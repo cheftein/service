@@ -652,23 +652,379 @@ if (isset($_GET['export_reviews']) && $_GET['export_reviews'] === 'csv') {
 <body>
 
 <?php if (!$is_logged_in): ?>
-    <!-- ВХОД -->
-    <div class="login-box">
-        <h1>⚙️ Вход в админку</h1>
-        <p style="color:#64748b; margin-bottom:20px;">Введите логин и пароль</p>
-        <?php if (isset($login_error)): ?>
-            <div style="background:#fee2e2; color:#dc2626; padding:12px; border-radius:10px; margin-bottom:15px;"><?= $login_error ?></div>
-        <?php endif; ?>
-        <form method="POST">
-            <input type="text" name="login" placeholder="Логин" required>
-            <input type="password" name="password" placeholder="Пароль" required>
-            <button type="submit" class="btn">Войти</button>
-        </form>
-        <p style="text-align:center; margin-top:15px; font-size:0.8rem; color:#94a3b8;">
-            По умолчанию: admin / 123456
-        </p>
-    </div>
-<?php else: ?>
+    <!-- ============================================================ -->
+    <!-- КРАСИВАЯ ФОРМА ВХОДА -->
+    <!-- ============================================================ -->
+    <!DOCTYPE html>
+    <html lang="ru">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Вход в админку</title>
+        <style>
+            @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap');
+            
+            * { margin:0; padding:0; box-sizing:border-box; }
+            
+            body {
+                font-family: 'Inter', 'Segoe UI', sans-serif;
+                min-height: 100vh;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                background: #0b1a2e;
+                background-image: 
+                    radial-gradient(ellipse at 10% 20%, rgba(250, 204, 21, 0.08) 0%, transparent 50%),
+                    radial-gradient(ellipse at 90% 80%, rgba(250, 204, 21, 0.05) 0%, transparent 50%),
+                    linear-gradient(135deg, #0b1a2e 0%, #1a334a 100%);
+                padding: 20px;
+            }
+            
+            .login-wrapper {
+                width: 100%;
+                max-width: 440px;
+                animation: fadeUp 0.6s ease-out;
+            }
+            
+            @keyframes fadeUp {
+                from { opacity:0; transform:translateY(30px); }
+                to { opacity:1; transform:translateY(0); }
+            }
+            
+            .login-box {
+                background: rgba(255,255,255,0.98);
+                backdrop-filter: blur(20px);
+                border-radius: 24px;
+                padding: 48px 40px 40px;
+                box-shadow: 
+                    0 25px 80px rgba(0,0,0,0.5),
+                    0 0 0 1px rgba(255,255,255,0.05);
+                position: relative;
+                overflow: hidden;
+            }
+            
+            .login-box::before {
+                content: '';
+                position: absolute;
+                top: 0;
+                left: 0;
+                right: 0;
+                height: 4px;
+                background: linear-gradient(90deg, #facc15, #fde047, #facc15);
+                background-size: 200% 100%;
+                animation: shimmer 3s ease-in-out infinite;
+            }
+            
+            @keyframes shimmer {
+                0%, 100% { background-position: 0% 0%; }
+                50% { background-position: 100% 0%; }
+            }
+            
+            .login-logo {
+                text-align: center;
+                margin-bottom: 32px;
+            }
+            
+            .login-logo .icon {
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                width: 72px;
+                height: 72px;
+                background: linear-gradient(135deg, #facc15, #fde047);
+                border-radius: 20px;
+                font-size: 2.2rem;
+                margin-bottom: 16px;
+                box-shadow: 0 8px 30px rgba(250, 204, 21, 0.3);
+                transition: transform 0.3s;
+            }
+            
+            .login-logo .icon:hover {
+                transform: scale(1.05) rotate(-3deg);
+            }
+            
+            .login-logo h1 {
+                font-size: 1.8rem;
+                font-weight: 700;
+                color: #0b1a2e;
+                letter-spacing: -0.5px;
+            }
+            
+            .login-logo p {
+                color: #64748b;
+                font-size: 0.95rem;
+                margin-top: 4px;
+            }
+            
+            .login-error {
+                background: #fee2e2;
+                border-left: 4px solid #dc2626;
+                color: #991b1b;
+                padding: 12px 16px;
+                border-radius: 12px;
+                margin-bottom: 20px;
+                font-size: 0.9rem;
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                animation: shake 0.4s ease;
+            }
+            
+            @keyframes shake {
+                0%, 100% { transform: translateX(0); }
+                20% { transform: translateX(-8px); }
+                40% { transform: translateX(8px); }
+                60% { transform: translateX(-4px); }
+                80% { transform: translateX(4px); }
+            }
+            
+            .form-group {
+                margin-bottom: 20px;
+            }
+            
+            .form-group label {
+                display: block;
+                font-size: 0.85rem;
+                font-weight: 600;
+                color: #334155;
+                margin-bottom: 6px;
+            }
+            
+            .form-group .input-wrapper {
+                position: relative;
+            }
+            
+            .form-group .input-wrapper .input-icon {
+                position: absolute;
+                left: 14px;
+                top: 50%;
+                transform: translateY(-50%);
+                font-size: 1.1rem;
+                color: #94a3b8;
+                transition: color 0.3s;
+            }
+            
+            .form-group input {
+                width: 100%;
+                padding: 14px 16px 14px 46px;
+                border: 2px solid #e2e8f0;
+                border-radius: 14px;
+                font-size: 1rem;
+                font-family: inherit;
+                background: #f8fafc;
+                transition: all 0.3s;
+                color: #0b1a2e;
+            }
+            
+            .form-group input:focus {
+                outline: none;
+                border-color: #facc15;
+                background: white;
+                box-shadow: 0 0 0 4px rgba(250, 204, 21, 0.15);
+            }
+            
+            .form-group input::placeholder {
+                color: #94a3b8;
+            }
+            
+            .form-options {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin: 8px 0 24px;
+            }
+            
+            .form-options label {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                font-size: 0.85rem;
+                color: #64748b;
+                cursor: pointer;
+            }
+            
+            .form-options label input[type="checkbox"] {
+                width: 18px;
+                height: 18px;
+                accent-color: #facc15;
+                cursor: pointer;
+            }
+            
+            .form-options a {
+                color: #64748b;
+                font-size: 0.85rem;
+                text-decoration: none;
+                transition: color 0.3s;
+            }
+            
+            .form-options a:hover {
+                color: #facc15;
+            }
+            
+            .btn-login {
+                width: 100%;
+                padding: 16px;
+                background: linear-gradient(135deg, #facc15, #fde047);
+                border: none;
+                border-radius: 14px;
+                font-size: 1.05rem;
+                font-weight: 700;
+                color: #0b1a2e;
+                cursor: pointer;
+                transition: all 0.3s;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: 10px;
+                position: relative;
+                overflow: hidden;
+            }
+            
+            .btn-login:hover {
+                transform: translateY(-2px);
+                box-shadow: 0 8px 30px rgba(250, 204, 21, 0.4);
+            }
+            
+            .btn-login:active {
+                transform: translateY(0);
+            }
+            
+            .btn-login .arrow {
+                transition: transform 0.3s;
+            }
+            
+            .btn-login:hover .arrow {
+                transform: translateX(4px);
+            }
+            
+            .login-footer {
+                text-align: center;
+                margin-top: 24px;
+                padding-top: 20px;
+                border-top: 1px solid #e2e8f0;
+            }
+            
+            .login-footer p {
+                color: #94a3b8;
+                font-size: 0.8rem;
+            }
+            
+            .login-footer .default-cred {
+                display: inline-flex;
+                align-items: center;
+                gap: 6px;
+                background: #f1f5f9;
+                padding: 4px 14px;
+                border-radius: 20px;
+                font-size: 0.75rem;
+                color: #475569;
+                margin-top: 6px;
+            }
+            
+            .login-footer .default-cred span {
+                font-weight: 600;
+                color: #0b1a2e;
+            }
+            
+            /* Декоративные элементы */
+            .decor-circle {
+                position: absolute;
+                border-radius: 50%;
+                opacity: 0.03;
+                pointer-events: none;
+            }
+            
+            .decor-circle.c1 {
+                width: 200px;
+                height: 200px;
+                background: #facc15;
+                top: -80px;
+                right: -80px;
+            }
+            
+            .decor-circle.c2 {
+                width: 150px;
+                height: 150px;
+                background: #facc15;
+                bottom: -60px;
+                left: -60px;
+            }
+            
+            @media (max-width: 480px) {
+                .login-box { padding: 32px 24px 28px; }
+                .login-logo .icon { width: 60px; height: 60px; font-size: 1.8rem; }
+                .login-logo h1 { font-size: 1.5rem; }
+                .form-options { flex-direction: column; gap: 10px; align-items: flex-start; }
+            }
+        </style>
+    </head>
+    <body>
+        <div class="login-wrapper">
+            <div class="login-box">
+                <!-- Декоративные элементы -->
+                <div class="decor-circle c1"></div>
+                <div class="decor-circle c2"></div>
+                
+                <!-- Логотип -->
+                <div class="login-logo">
+                    <div class="icon">🔧</div>
+                    <h1>Вход в админку</h1>
+                    <p>Управляйте вашим автосервисом</p>
+                </div>
+                
+                <!-- Ошибка -->
+                <?php if (isset($login_error)): ?>
+                    <div class="login-error">
+                        <span>⚠️</span>
+                        <?= $login_error ?>
+                    </div>
+                <?php endif; ?>
+                
+                <!-- Форма -->
+                <form method="POST">
+                    <div class="form-group">
+                        <label>👤 Логин</label>
+                        <div class="input-wrapper">
+                            <span class="input-icon">👤</span>
+                            <input type="text" name="login" placeholder="Введите логин" required autofocus>
+                        </div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>🔒 Пароль</label>
+                        <div class="input-wrapper">
+                            <span class="input-icon">🔑</span>
+                            <input type="password" name="password" placeholder="Введите пароль" required>
+                        </div>
+                    </div>
+                    
+                    <div class="form-options">
+                        <label>
+                            <input type="checkbox" checked> Запомнить меня
+                        </label>
+                        <a href="#">Забыли пароль?</a>
+                    </div>
+                    
+                    <button type="submit" class="btn-login">
+                        Войти в систему
+                        <span class="arrow">→</span>
+                    </button>
+                </form>
+                
+                <!-- Подвал -->
+                <div class="login-footer">
+                    <p>Доступ по умолчанию</p>
+                    <div class="default-cred">
+                        <span>👤</span> admin <span style="opacity:0.3;">/</span> <span>🔑</span> 123456
+                    </div>
+                </div>
+            </div>
+        </div>
+    </body>
+    </html>
+<?php exit; ?>
+<?php endif; ?>
+
     <!-- САЙДБАР -->
     <div class="sidebar">
         <h2>⚙️ Админка</h2>
