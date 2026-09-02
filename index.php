@@ -63,8 +63,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['order_submit'])) {
         .form-group textarea { resize:vertical; min-height:80px; }
         .floating-phone { position:fixed; bottom:25px; right:25px; background:#22c55e; color:white; width:70px; height:70px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:2.2rem; text-decoration:none; z-index:999; border:3px solid white; box-shadow:0 6px 25px rgba(34,197,94,0.5); transition:0.3s; }
         .floating-phone:hover { transform:scale(1.1); background:#16a34a; }
-        .admin-link { position:fixed; bottom:20px; left:20px; background:#0b1a2e; color:#94a3b8; padding:10px 18px; border-radius:30px; text-decoration:none; font-size:0.8rem; z-index:999; opacity:0.5; transition:0.3s; }
-        .admin-link:hover { opacity:1; color:white; }
         .success-msg { background:#22c55e; color:white; padding:15px; border-radius:10px; margin-bottom:20px; }
         .contacts-grid { display:grid; grid-template-columns:1fr 2fr; gap:30px; margin:30px 0; }
         .contacts-info { background:white; padding:30px; border-radius:20px; }
@@ -217,7 +215,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['order_submit'])) {
 </div>
 
 <a href="tel:<?= preg_replace('/[^0-9]/', '', $settings['phone']) ?>" class="floating-phone">📞</a>
-<a href="admin.php" class="admin-link">⚙️ Админка</a>
+
+<!-- Ссылка на админку скрыта. Доступ по адресу /admin.php -->
 
 </body>
 </html>
