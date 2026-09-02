@@ -177,15 +177,18 @@ $new_orders_count = count(array_filter($orders, function($o) { return $o['status
     <!-- ВХОД -->
     <div class="login-box">
         <h1>⚙️ Вход в админку</h1>
-        <p style="color:#64748b; margin-bottom:20px;">Логин: <strong>admin</strong> / Пароль: <strong>123456</strong></p>
+        <p style="color:#64748b; margin-bottom:20px;">Введите логин и пароль</p>
         <?php if (isset($login_error)): ?>
             <div style="background:#fee2e2; color:#dc2626; padding:12px; border-radius:10px; margin-bottom:15px;"><?= $login_error ?></div>
         <?php endif; ?>
         <form method="POST">
-            <input type="text" name="login" placeholder="Логин" value="admin">
-            <input type="password" name="password" placeholder="Пароль" value="123456">
+            <input type="text" name="login" placeholder="Логин" required>
+            <input type="password" name="password" placeholder="Пароль" required>
             <button type="submit" class="btn">Войти</button>
         </form>
+        <p style="text-align:center; margin-top:15px; font-size:0.8rem; color:#94a3b8;">
+            По умолчанию: admin / 123456
+        </p>
     </div>
 <?php else: ?>
     <!-- САЙДБАР -->
@@ -241,140 +244,4 @@ $new_orders_count = count(array_filter($orders, function($o) { return $o['status
         <?php if ($tab === 'services'): ?>
             <h1 style="margin-bottom:20px;">🔧 Управление услугами</h1>
             <div class="card">
-                <h3>➕ Добавить услугу</h3>
-                <form method="POST">
-                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
-                        <input type="text" name="service_icon" placeholder="Иконка (🔧)" style="padding:12px; border:2px solid #e2e8f0; border-radius:10px;">
-                        <input type="text" name="service_title" placeholder="Название" style="padding:12px; border:2px solid #e2e8f0; border-radius:10px;">
-                        <input type="text" name="service_description" placeholder="Описание" style="padding:12px; border:2px solid #e2e8f0; border-radius:10px;">
-                        <input type="text" name="service_price" placeholder="Цена (например: от 5 000 ₽)" style="padding:12px; border:2px solid #e2e8f0; border-radius:10px;">
-                    </div>
-                    <button type="submit" name="add_service" class="btn" style="margin-top:10px;">➕ Добавить услугу</button>
-                </form>
-            </div>
-            <div class="card">
-                <h3>📋 Список услуг</h3>
-                <table class="table">
-                    <thead>
-                        <tr><th>#</th><th>Иконка</th><th>Название</th><th>Цена</th><th>Действие</th></tr>
-                    </thead>
-                    <tbody>
-                        <?php foreach ($services as $s): ?>
-                        <tr>
-                            <td><?= $s['id'] ?></td>
-                            <td><?= $s['icon'] ?></td>
-                            <td><?= $s['title'] ?></td>
-                            <td><?= $s['price'] ?></td>
-                            <td><a href="?tab=services&delete_service=<?= $s['id'] ?>" onclick="return confirm('Удалить услугу?')" style="color:#ef4444; text-decoration:none;">🗑️ Удалить</a></td>
-                        </tr>
-                        <?php endforeach; ?>
-                    </tbody>
-                </table>
-            </div>
-        <?php endif; ?>
-
-        <?php if ($tab === 'reviews'): ?>
-            <h1 style="margin-bottom:20px;">💬 Управление отзывами</h1>
-            <div class="card">
-                <h3>➕ Добавить отзыв</h3>
-                <form method="POST">
-                    <div class="form-group">
-                        <label>Имя клиента</label>
-                        <input type="text" name="review_name" placeholder="Например: Алексей" required>
-                    </div>
-                    <div class="form-group">
-                        <label>Автомобиль</label>
-                        <input type="text" name="review_car" placeholder="Например: Kia Rio, 2020">
-                    </div>
-                    <div class="form-group">
-                        <label>Текст отзыва</label>
-                        <textarea name="review_text" placeholder="Текст отзыва..." rows="3" required></textarea>
-                    </div>
-                    <button type="submit" name="add_review" class="btn">➕ Добавить отзыв</button>
-                </form>
-            </div>
-            <div class="card">
-                <h3>📋 Все отзывы</h3>
-                <?php if (count($reviews) > 0): ?>
-                    <?php foreach ($reviews as $r): ?>
-                        <div style="border-bottom:1px solid #e2e8f0; padding:15px 0; display:flex; justify-content:space-between; align-items:center;">
-                            <div>
-                                <strong><?= htmlspecialchars($r['name']) ?></strong>
-                                <?php if ($r['car']): ?>
-                                    <span style="color:#64748b;">— <?= htmlspecialchars($r['car']) ?></span>
-                                <?php endif; ?>
-                                <p style="margin-top:5px; color:#475569;"><?= htmlspecialchars($r['text']) ?></p>
-                            </div>
-                            <a href="?tab=reviews&delete_review=<?= $r['id'] ?>" onclick="return confirm('Удалить отзыв?')" style="color:#ef4444; text-decoration:none;">🗑️</a>
-                        </div>
-                    <?php endforeach; ?>
-                <?php else: ?>
-                    <p style="color:#64748b;">Пока нет отзывов</p>
-                <?php endif; ?>
-            </div>
-        <?php endif; ?>
-
-        <?php if ($tab === 'orders'): ?>
-            <h1 style="margin-bottom:20px;">📩 Заявки</h1>
-            <div class="card">
-                <?php if (count($orders) > 0): ?>
-                    <table class="table">
-                        <thead>
-                            <tr><th>#</th><th>Имя</th><th>Телефон</th><th>Услуга</th><th>Дата</th><th>Статус</th><th>Действие</th></tr>
-                        </thead>
-                        <tbody>
-                            <?php foreach ($orders as $o): ?>
-                            <tr>
-                                <td><?= $o['id'] ?></td>
-                                <td><?= htmlspecialchars($o['name']) ?></td>
-                                <td><?= htmlspecialchars($o['phone']) ?></td>
-                                <td><?= htmlspecialchars($o['service']) ?></td>
-                                <td><?= $o['date'] ?? '-' ?></td>
-                                <td><span class="status-badge status-<?= $o['status'] ?>"><?= $o['status'] ?></span></td>
-                                <td>
-                                    <?php if ($o['status'] === 'new'): ?>
-                                        <a href="?tab=orders&update_status=<?= $o['id'] ?>&status=processed" class="btn btn-sm" style="background:#3b82f6; color:white; text-decoration:none; display:inline-block;">В работу</a>
-                                    <?php elseif ($o['status'] === 'processed'): ?>
-                                        <a href="?tab=orders&update_status=<?= $o['id'] ?>&status=done" class="btn btn-sm" style="background:#22c55e; color:white; text-decoration:none; display:inline-block;">Выполнено</a>
-                                    <?php endif; ?>
-                                    <a href="?tab=orders&delete_order=<?= $o['id'] ?>" onclick="return confirm('Удалить заявку?')" style="color:#ef4444; text-decoration:none; margin-left:5px;">🗑️</a>
-                                </td>
-                            </tr>
-                            <?php endforeach; ?>
-                        </tbody>
-                    </table>
-                <?php else: ?>
-                    <p style="color:#64748b;">Пока нет заявок</p>
-                <?php endif; ?>
-            </div>
-        <?php endif; ?>
-
-        <?php if ($tab === 'gallery'): ?>
-            <h1 style="margin-bottom:20px;">🖼️ Галерея</h1>
-            <div class="card">
-                <h3>📤 Загрузить фото</h3>
-                <form method="POST" enctype="multipart/form-data">
-                    <input type="file" name="photo" accept="image/*" required style="display:block; margin-bottom:10px;">
-                    <button type="submit" class="btn">📤 Загрузить</button>
-                </form>
-            </div>
-            <div class="gallery-grid">
-                <?php if (count($gallery) > 0): ?>
-                    <?php foreach ($gallery as $img): ?>
-                    <div class="gallery-item">
-                        <img src="<?= $img['path'] ?>" alt="Фото">
-                        <div class="info">
-                            <a href="?tab=gallery&delete_photo=<?= urlencode($img['filename']) ?>" onclick="return confirm('Удалить фото?')" style="color:#ef4444; text-decoration:none;">🗑️ Удалить</a>
-                        </div>
-                    </div>
-                    <?php endforeach; ?>
-                <?php else: ?>
-                    <p style="color:#64748b;">Нет загруженных фото</p>
-                <?php endif; ?>
-            </div>
-        <?php endif; ?>
-    </div>
-<?php endif; ?>
-
-</body>
-</html>
+                <h3>➕ Доба
