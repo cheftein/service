@@ -22,6 +22,40 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login'])) {
     }
 }
 
+// ============================================================
+// ВАЖНО! ОБРАБОТКА AJAX ЗАПРОСОВ ДОЛЖНА БЫТЬ ДО HTML!
+// ============================================================
+
+// AJAX: обновление статуса заявки
+if (isset($_POST['ajax_status_update'])) {
+    $id = (int)$_POST['id'];
+    $status = $_POST['status'] ?? '';
+    if ($id && $status) {
+        update_order_status($id, $status);
+        echo json_encode(['success' => true]);
+    } else {
+        echo json_encode(['success' => false]);
+    }
+    exit;
+}
+
+// AJAX: обновление статуса отзыва
+if (isset($_POST['ajax_review_status'])) {
+    $id = (int)$_POST['id'];
+    $status = $_POST['status'] ?? '';
+    if ($id && $status) {
+        update_review_status($id, $status);
+        echo json_encode(['success' => true]);
+    } else {
+        echo json_encode(['success' => false]);
+    }
+    exit;
+}
+
+// ============================================================
+// ОБРАБОТКА ОСТАЛЬНЫХ ДЕЙСТВИЙ
+// ============================================================
+
 // Обработка действий (только для админа)
 if ($is_logged_in) {
     // Сохранение настроек
@@ -73,19 +107,6 @@ if ($is_logged_in) {
     if (isset($_GET['delete_review'])) {
         delete_review((int)$_GET['delete_review']);
         header('Location: admin.php?tab=reviews');
-        exit;
-    }
-    
-    // Обновление статуса отзыва через AJAX
-    if (isset($_POST['ajax_review_status'])) {
-        $id = (int)$_POST['id'];
-        $status = $_POST['status'] ?? '';
-        if ($id && $status) {
-            update_review_status($id, $status);
-            echo json_encode(['success' => true]);
-        } else {
-            echo json_encode(['success' => false]);
-        }
         exit;
     }
     
@@ -1017,37 +1038,7 @@ if (isset($_GET['export_reviews']) && $_GET['export_reviews'] === 'csv') {
             $done_count = count(array_filter($orders, function($o) { return $o['status'] === 'done'; }));
             $filtered_count = count($filtered_orders);
             
-            if (isset($_POST['ajax_status_update'])) {
-                $id = (int)$_POST['id'];
-                $status = $_POST['status'] ?? '';
-                if ($id && $status) {
-                    update_order_status($id, $status);
-                    echo json_encode(['success' => true]);
-                } else {
-                    echo json_encode(['success' => false]);
-                }
-                exit;
-            }
-            
-            if (isset($_GET['export']) && $_GET['export'] === 'csv') {
-                header('Content-Type: text/csv; charset=utf-8');
-                header('Content-Disposition: attachment; filename=zayavki_' . date('Y-m-d') . '.csv');
-                $output = fopen('php://output', 'w');
-                fputcsv($output, ['ID', 'Имя', 'Телефон', 'Услуга', 'Дата', 'Статус', 'Комментарий']);
-                foreach ($filtered_orders as $o) {
-                    fputcsv($output, [
-                        $o['id'],
-                        $o['name'],
-                        $o['phone'],
-                        $o['service'] ?? '',
-                        $o['date'] ?? '',
-                        $o['status'],
-                        $o['comment'] ?? ''
-                    ]);
-                }
-                fclose($output);
-                exit;
-            }
+            // Обработка AJAX уже в начале файла!
             ?>
             
             <h1 style="margin-bottom:10px;">📩 Заявки</h1>
