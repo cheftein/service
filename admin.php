@@ -1453,7 +1453,7 @@ if (isset($_GET['export_reviews']) && $_GET['export_reviews'] === 'csv') {
                         </div>
                     </div>
                     <button type="submit" class="btn" style="margin-top:10px;">📤 Загрузить</button>
-                    <button type="button" class="btn" style="background:#64748b; color:white; margin-top:10px;" onclick="document.getElementById('image-preview-container').style.display='none'; document.getElementById('upload-form').style.display='none';">✕ Отмена</button>
+                    <button type="button" class="btn" style="background:#64748b; color:white; margin-top:10px;" onclick="document.getElementById('image-preview-container').style.display='none'; document.getElementById('upload-form').style.display='none'; document.getElementById('drop-zone').style.display='block';">✕ Отмена</button>
                 </form>
             </div>
             
@@ -1582,11 +1582,9 @@ if (isset($_GET['export_reviews']) && $_GET['export_reviews'] === 'csv') {
                     if (selectedFiles.length > 0) {
                         previewContainer.style.display = 'block';
                         uploadForm.style.display = 'block';
-                        // Берём первый файл для основной загрузки
                         const dataTransfer = new DataTransfer();
                         dataTransfer.items.add(selectedFiles[0]);
                         mainFileInput.files = dataTransfer.files;
-                        // Заполняем название автоматически
                         if (!photoTitle.value) {
                             photoTitle.value = selectedFiles[0].name.replace(/\.[^/.]+$/, '');
                         }
