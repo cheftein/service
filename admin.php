@@ -190,8 +190,23 @@ if ($is_logged_in) {
     
     // Загрузка фото
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['photo'])) {
+        $title = trim($_POST['photo_title'] ?? '');
+        $category = trim($_POST['photo_category'] ?? 'workshop');
         $filename = upload_file($_FILES['photo']);
         if ($filename) {
+            // Сохраняем информацию о фото
+            $gallery_data = load_data('gallery_meta.json');
+            if (!is_array($gallery_data)) {
+                $gallery_data = [];
+            }
+            $gallery_data[] = [
+                'id' => count($gallery_data) > 0 ? max(array_column($gallery_data, 'id')) + 1 : 1,
+                'filename' => $filename,
+                'title' => $title,
+                'category' => $category,
+                'created_at' => date('Y-m-d H:i:s')
+            ];
+            save_data('gallery_meta.json', $gallery_data);
             $success = '✅ Фото загружено!';
         } else {
             $error = '❌ Ошибка загрузки (разрешены: jpg, png, gif, webp)';
@@ -200,7 +215,36 @@ if ($is_logged_in) {
     
     // Удаление фото
     if (isset($_GET['delete_photo'])) {
-        delete_photo($_GET['delete_photo']);
+        $filename = $_GET['delete_photo'];
+        delete_photo($filename);
+        // Удаляем метаданные
+        $gallery_data = load_data('gallery_meta.json');
+        if (is_array($gallery_data)) {
+            $gallery_data = array_filter($gallery_data, function($item) use ($filename) {
+                return $item['filename'] !== $filename;
+            });
+            save_data('gallery_meta.json', array_values($gallery_data));
+        }
+        header('Location: admin.php?tab=gallery');
+        exit;
+    }
+    
+    // Массовое удаление фото
+    if (isset($_POST['delete_selected']) && isset($_POST['selected_photos'])) {
+        $selected = $_POST['selected_photos'];
+        if (is_array($selected) && count($selected) > 0) {
+            $gallery_data = load_data('gallery_meta.json');
+            if (is_array($gallery_data)) {
+                foreach ($selected as $filename) {
+                    delete_photo($filename);
+                    $gallery_data = array_filter($gallery_data, function($item) use ($filename) {
+                        return $item['filename'] !== $filename;
+                    });
+                }
+                save_data('gallery_meta.json', array_values($gallery_data));
+            }
+            $success = '✅ Выбранные фото удалены!';
+        }
         header('Location: admin.php?tab=gallery');
         exit;
     }
@@ -211,7 +255,63 @@ $settings = load_data('settings.json');
 $services = get_services();
 $reviews = get_reviews();
 $orders = get_orders();
-$gallery = get_gallery();
+
+// Загрузка метаданных галереи
+$gallery_meta = load_data('gallery_meta.json');
+if (!is_array($gallery_meta)) {
+    $gallery_meta = [];
+}
+
+// Получаем список файлов и объединяем с метаданными
+$gallery_files = get_gallery();
+$gallery = [];
+foreach ($gallery_files as $file) {
+    $meta = null;
+    foreach ($gallery_meta as $m) {
+        if ($m['filename'] === $file['filename']) {
+            $meta = $m;
+            break;
+        }
+    }
+    $gallery[] = [
+        'filename' => $file['filename'],
+        'path' => $file['path'],
+        'title' => $meta['title'] ?? '',
+        'category' => $meta['category'] ?? 'workshop',
+        'created_at' => $meta['created_at'] ?? date('Y-m-d H:i:s'),
+        'id' => $meta['id'] ?? 0
+    ];
+}
+
+// Сортировка: сначала новые
+usort($gallery, function($a, $b) {
+    return strtotime($b['created_at']) - strtotime($a['created_at']);
+});
+
+// Фильтр по категории
+$gallery_filter = $_GET['gallery_filter'] ?? 'all';
+$filtered_gallery = $gallery;
+if ($gallery_filter !== 'all') {
+    $filtered_gallery = array_filter($filtered_gallery, function($item) use ($gallery_filter) {
+        return $item['category'] === $gallery_filter;
+    });
+}
+
+// Статистика галереи
+$total_photos = count($gallery);
+$category_stats = [];
+$categories = [
+    'workshop' => '🔧 Мастерская',
+    'team' => '👥 Команда',
+    'work' => '🛠️ Примеры работ',
+    'equipment' => '📟 Оборудование'
+];
+foreach ($categories as $key => $label) {
+    $category_stats[$key] = count(array_filter($gallery, function($item) use ($key) {
+        return $item['category'] === $key;
+    }));
+}
+
 $new_orders_count = count(array_filter($orders, function($o) { return $o['status'] === 'new'; }));
 
 // Для редактирования отзыва
@@ -281,7 +381,7 @@ usort($filtered_services, function($a, $b) {
 });
 
 // Категории для фильтра
-$categories = ['all' => 'Все', 'repair' => '🔧 Ремонт', 'diagnostic' => '🖥️ Диагностика', 'replacement' => '⛽ Замена', 'tires' => '🛞 Шиномонтаж'];
+$categories_services = ['all' => 'Все', 'repair' => '🔧 Ремонт', 'diagnostic' => '🖥️ Диагностика', 'replacement' => '⛽ Замена', 'tires' => '🛞 Шиномонтаж'];
 $category_filter = $_GET['category'] ?? 'all';
 if ($category_filter !== 'all') {
     $filtered_services = array_filter($filtered_services, function($s) use ($category_filter) {
@@ -292,7 +392,7 @@ if ($category_filter !== 'all') {
 // Статистика услуг
 $total_services = count($services);
 $categories_count = [];
-foreach ($categories as $key => $label) {
+foreach ($categories_services as $key => $label) {
     if ($key === 'all') continue;
     $categories_count[$key] = count(array_filter($services, function($s) use ($key) {
         return ($s['category'] ?? 'all') === $key;
@@ -321,7 +421,7 @@ if (isset($_GET['export_services']) && $_GET['export_services'] === 'csv') {
             $s['title'],
             $s['description'],
             $s['price'],
-            $categories[$s['category'] ?? 'all'] ?? 'Без категории'
+            $categories_services[$s['category'] ?? 'all'] ?? 'Без категории'
         ]);
     }
     fclose($output);
@@ -390,24 +490,65 @@ if (isset($_GET['export_reviews']) && $_GET['export_reviews'] === 'csv') {
         .table th, .table td { padding:12px; text-align:left; border-bottom:1px solid #e2e8f0; }
         .table th { background:#f8fafc; font-weight:600; }
         .table .service-icon { font-size:1.8rem; }
-        .gallery-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:15px; }
-        .gallery-item { background:white; border-radius:10px; overflow:hidden; box-shadow:0 2px 5px rgba(0,0,0,0.1); }
-        .gallery-item img { width:100%; height:150px; object-fit:cover; }
-        .gallery-item .info { padding:10px; text-align:center; }
-        .login-box { max-width:400px; margin:100px auto; background:white; padding:40px; border-radius:20px; box-shadow:0 20px 60px rgba(0,0,0,0.2); }
-        .login-box h1 { margin-bottom:10px; }
-        .login-box input { width:100%; padding:14px; border:2px solid #e2e8f0; border-radius:10px; margin-bottom:15px; font-size:1rem; }
-        .login-box .btn { width:100%; text-align:center; }
-        .status-badge { padding:4px 12px; border-radius:20px; font-size:0.8rem; font-weight:600; }
-        .status-new { background:#fef3c7; color:#92400e; }
-        .status-processed { background:#dbeafe; color:#1e40af; }
-        .status-done { background:#bbf7d0; color:#15803d; }
-        .status-published { background:#bbf7d0; color:#15803d; }
-        .status-pending { background:#fef3c7; color:#92400e; }
-        .status-rejected { background:#fee2e2; color:#dc2626; }
-        .logout-link { color:#ef4444; margin-top:20px; display:block; text-decoration:none; }
-        .logout-link:hover { color:#dc2626; }
-        .flex-between { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; }
+        
+        /* Стили для галереи */
+        .gallery-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:20px; }
+        .gallery-item { background:white; border-radius:15px; overflow:hidden; box-shadow:0 2px 10px rgba(0,0,0,0.08); transition:transform 0.3s; cursor:pointer; }
+        .gallery-item:hover { transform:translateY(-5px); box-shadow:0 8px 25px rgba(0,0,0,0.12); }
+        .gallery-image-container { position:relative; overflow:hidden; height:200px; background:#e9edf2; }
+        .gallery-image-container img { width:100%; height:100%; object-fit:cover; transition:transform 0.3s; }
+        .gallery-item:hover .gallery-image-container img { transform:scale(1.05); }
+        .gallery-item .gallery-info { padding:15px; }
+        .gallery-item .gallery-title { font-weight:600; font-size:1rem; margin-bottom:3px; }
+        .gallery-item .gallery-category { color:#64748b; font-size:0.8rem; }
+        .gallery-item .gallery-date { color:#94a3b8; font-size:0.7rem; margin-top:5px; }
+        .gallery-item .gallery-actions { display:flex; gap:8px; margin-top:10px; }
+        .gallery-item .gallery-actions a, .gallery-item .gallery-actions button { padding:4px 12px; border-radius:6px; font-size:0.8rem; border:none; cursor:pointer; text-decoration:none; }
+        .gallery-item .gallery-actions .delete-btn { background:#fee2e2; color:#dc2626; }
+        .gallery-item .gallery-actions .delete-btn:hover { background:#fecaca; }
+        .gallery-item .gallery-actions .copy-btn { background:#dbeafe; color:#2563eb; }
+        .gallery-item .gallery-actions .copy-btn:hover { background:#bfdbfe; }
+        
+        /* Drop zone для загрузки */
+        .drop-zone { border:3px dashed #e2e8f0; border-radius:15px; padding:40px 20px; text-align:center; transition:0.3s; cursor:pointer; background:#f8fafc; }
+        .drop-zone:hover { border-color:#facc15; background:#fefce8; }
+        .drop-zone.dragover { border-color:#facc15; background:#fefce8; }
+        .drop-zone .icon { font-size:3rem; display:block; margin-bottom:10px; }
+        .drop-zone p { color:#64748b; }
+        .drop-zone .btn { margin-top:10px; }
+        
+        /* Превью перед загрузкой */
+        #image-preview-container { display:none; margin-top:15px; text-align:center; }
+        #image-preview-container img { max-width:200px; max-height:150px; border-radius:10px; border:2px solid #e2e8f0; }
+        
+        /* Лайтбокс */
+        .lightbox { display:none; position:fixed; z-index:9999; left:0; top:0; width:100%; height:100%; background:rgba(0,0,0,0.9); align-items:center; justify-content:center; }
+        .lightbox-content { max-width:90%; max-height:90%; position:relative; }
+        .lightbox-content img { max-width:100%; max-height:90vh; border-radius:10px; }
+        .lightbox-close { position:absolute; top:-40px; right:0; color:white; font-size:2.5rem; cursor:pointer; transition:0.3s; }
+        .lightbox-close:hover { color:#facc15; }
+        .lightbox-nav { position:absolute; top:50%; transform:translateY(-50%); color:white; font-size:3rem; cursor:pointer; padding:10px 20px; transition:0.3s; }
+        .lightbox-nav:hover { color:#facc15; }
+        .lightbox-prev { left:20px; }
+        .lightbox-next { right:20px; }
+        .lightbox-info { position:absolute; bottom:-50px; left:0; color:white; font-size:1rem; opacity:0.8; }
+        
+        /* Фильтры для галереи */
+        .gallery-filters { display:flex; gap:10px; margin-bottom:20px; flex-wrap:wrap; }
+        .gallery-filters a { padding:6px 16px; border-radius:20px; text-decoration:none; font-size:0.9rem; transition:0.3s; background:#f1f5f9; color:#64748b; }
+        .gallery-filters a:hover { background:#e2e8f0; }
+        .gallery-filters a.active { background:#0b1a2e; color:white; }
+        
+        /* Чекбоксы для массового удаления */
+        .select-all-container { display:flex; align-items:center; gap:10px; margin-bottom:15px; flex-wrap:wrap; }
+        .select-all-container input[type="checkbox"] { width:20px; height:20px; cursor:pointer; }
+        .gallery-item .select-checkbox { position:absolute; top:10px; left:10px; z-index:10; }
+        .gallery-item .select-checkbox input[type="checkbox"] { width:20px; height:20px; cursor:pointer; }
+        
+        .stats-gallery { display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:15px; margin-bottom:25px; }
+        .stat-gallery { background:white; padding:15px; border-radius:12px; text-align:center; box-shadow:0 2px 10px rgba(0,0,0,0.05); }
+        .stat-gallery .num { font-size:1.8rem; font-weight:700; color:#0b1a2e; }
+        .stat-gallery .label { color:#64748b; font-size:0.8rem; }
         
         /* Стили для вкладки Заявки */
         .stats-orders { display:grid; grid-template-columns:repeat(4,1fr); gap:15px; margin-bottom:25px; }
@@ -490,11 +631,16 @@ if (isset($_GET['export_reviews']) && $_GET['export_reviews'] === 'csv') {
             .sidebar { width:100%; min-height:auto; }
             .stats { grid-template-columns:1fr 1fr; }
             .stats-orders { grid-template-columns:1fr 1fr; }
+            .stats-gallery { grid-template-columns:1fr 1fr; }
             .filters { gap:5px; }
             .filters a { padding:5px 12px; font-size:0.8rem; }
             .export-buttons { gap:5px; }
             .review-card-admin .review-header { flex-wrap:wrap; }
             .review-card-admin .review-rating { margin-left:0; }
+            .gallery-grid { grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); }
+            .lightbox-nav { font-size:2rem; padding:10px; }
+            .lightbox-prev { left:5px; }
+            .lightbox-next { right:5px; }
         }
         @media print {
             .sidebar, .filters, .export-buttons, .no-print { display:none !important; }
@@ -550,7 +696,7 @@ if (isset($_GET['export_reviews']) && $_GET['export_reviews'] === 'csv') {
                 <div class="stat"><div class="num"><?= count($services) ?></div><div class="label">Услуг</div></div>
                 <div class="stat"><div class="num"><?= $total_reviews ?></div><div class="label">Отзывов</div></div>
                 <div class="stat"><div class="num"><?= $new_orders_count ?></div><div class="label">Новых заявок</div></div>
-                <div class="stat"><div class="num"><?= count($gallery) ?></div><div class="label">Фото</div></div>
+                <div class="stat"><div class="num"><?= $total_photos ?></div><div class="label">Фото</div></div>
             </div>
             <div class="card">
                 <h3>📌 Быстрые ссылки</h3>
@@ -604,7 +750,7 @@ if (isset($_GET['export_reviews']) && $_GET['export_reviews'] === 'csv') {
                 });
             }
             
-            $categories = [
+            $categories_services = [
                 'all' => '📋 Все',
                 'repair' => '🔧 Ремонт',
                 'diagnostic' => '🖥️ Диагностика',
@@ -613,7 +759,7 @@ if (isset($_GET['export_reviews']) && $_GET['export_reviews'] === 'csv') {
             ];
             
             $stats_categories = [];
-            foreach ($categories as $key => $label) {
+            foreach ($categories_services as $key => $label) {
                 if ($key === 'all') continue;
                 $stats_categories[$key] = count(array_filter($all_services, function($s) use ($key) {
                     return ($s['category'] ?? 'all') === $key;
@@ -647,7 +793,7 @@ if (isset($_GET['export_reviews']) && $_GET['export_reviews'] === 'csv') {
                 <?php foreach ($stats_categories as $key => $count): ?>
                     <div class="stat">
                         <div class="num"><?= $count ?></div>
-                        <div class="label"><?= $categories[$key] ?></div>
+                        <div class="label"><?= $categories_services[$key] ?></div>
                     </div>
                 <?php endforeach; ?>
                 <div class="stat">
@@ -657,7 +803,7 @@ if (isset($_GET['export_reviews']) && $_GET['export_reviews'] === 'csv') {
             </div>
             
             <div class="filters">
-                <?php foreach ($categories as $key => $label): ?>
+                <?php foreach ($categories_services as $key => $label): ?>
                     <a href="?tab=services&category=<?= $key ?><?= $search_service ? '&search_service='.urlencode($search_service) : '' ?>" class="<?= $category_filter === $key ? 'active-category' : '' ?>">
                         <?= $label ?> (<?= $key === 'all' ? count($all_services) : ($stats_categories[$key] ?? 0) ?>)
                     </a>
@@ -692,7 +838,7 @@ if (isset($_GET['export_reviews']) && $_GET['export_reviews'] === 'csv') {
                         <div class="form-group">
                             <label>Категория</label>
                             <select name="<?= $edit_service_data ? 'edit_service_category' : 'service_category' ?>">
-                                <?php foreach ($categories as $key => $label): ?>
+                                <?php foreach ($categories_services as $key => $label): ?>
                                     <?php if ($key === 'all') continue; ?>
                                     <option value="<?= $key ?>" <?= $edit_service_data && ($edit_service_data['category'] ?? 'all') === $key ? 'selected' : '' ?>><?= $label ?></option>
                                 <?php endforeach; ?>
@@ -756,7 +902,7 @@ if (isset($_GET['export_reviews']) && $_GET['export_reviews'] === 'csv') {
                                         elseif ($cat_key === 'tires') $cat_class = 'category-tires';
                                         ?>
                                         <span class="service-category-badge <?= $cat_class ?>">
-                                            <?= $categories[$cat_key] ?? 'Без категории' ?>
+                                            <?= $categories_services[$cat_key] ?? 'Без категории' ?>
                                         </span>
                                     </td>
                                     <td><strong><?= $s['price'] ?></strong></td>
@@ -1037,8 +1183,6 @@ if (isset($_GET['export_reviews']) && $_GET['export_reviews'] === 'csv') {
             $processed_count = count(array_filter($orders, function($o) { return $o['status'] === 'processed'; }));
             $done_count = count(array_filter($orders, function($o) { return $o['status'] === 'done'; }));
             $filtered_count = count($filtered_orders);
-            
-            // Обработка AJAX уже в начале файла!
             ?>
             
             <h1 style="margin-bottom:10px;">📩 Заявки</h1>
@@ -1184,28 +1328,357 @@ if (isset($_GET['export_reviews']) && $_GET['export_reviews'] === 'csv') {
         <?php endif; ?>
 
         <?php if ($tab === 'gallery'): ?>
-            <h1 style="margin-bottom:20px;">🖼️ Галерея</h1>
+            <?php
+            // Загрузка метаданных галереи
+            $gallery_meta = load_data('gallery_meta.json');
+            if (!is_array($gallery_meta)) {
+                $gallery_meta = [];
+            }
+            
+            // Получаем список файлов и объединяем с метаданными
+            $gallery_files = get_gallery();
+            $gallery = [];
+            foreach ($gallery_files as $file) {
+                $meta = null;
+                foreach ($gallery_meta as $m) {
+                    if ($m['filename'] === $file['filename']) {
+                        $meta = $m;
+                        break;
+                    }
+                }
+                $gallery[] = [
+                    'filename' => $file['filename'],
+                    'path' => $file['path'],
+                    'title' => $meta['title'] ?? '',
+                    'category' => $meta['category'] ?? 'workshop',
+                    'created_at' => $meta['created_at'] ?? date('Y-m-d H:i:s'),
+                    'id' => $meta['id'] ?? 0
+                ];
+            }
+            
+            // Сортировка: сначала новые
+            usort($gallery, function($a, $b) {
+                return strtotime($b['created_at']) - strtotime($a['created_at']);
+            });
+            
+            // Фильтр по категории
+            $gallery_filter = $_GET['gallery_filter'] ?? 'all';
+            $filtered_gallery = $gallery;
+            if ($gallery_filter !== 'all') {
+                $filtered_gallery = array_filter($filtered_gallery, function($item) use ($gallery_filter) {
+                    return $item['category'] === $gallery_filter;
+                });
+            }
+            
+            // Статистика галереи
+            $total_photos = count($gallery);
+            $category_stats = [];
+            $categories = [
+                'workshop' => '🔧 Мастерская',
+                'team' => '👥 Команда',
+                'work' => '🛠️ Примеры работ',
+                'equipment' => '📟 Оборудование'
+            ];
+            foreach ($categories as $key => $label) {
+                $category_stats[$key] = count(array_filter($gallery, function($item) use ($key) {
+                    return $item['category'] === $key;
+                }));
+            }
+            ?>
+            
+            <div class="flex-between" style="margin-bottom:20px;">
+                <h1>🖼️ Галерея</h1>
+                <div style="display:flex; gap:10px;">
+                    <button class="btn btn-sm btn-primary" onclick="window.print()">🖨️ Печать</button>
+                </div>
+            </div>
+            
+            <!-- СТАТИСТИКА -->
+            <div class="stats-gallery">
+                <div class="stat-gallery">
+                    <div class="num"><?= $total_photos ?></div>
+                    <div class="label">📷 Всего фото</div>
+                </div>
+                <?php foreach ($category_stats as $key => $count): ?>
+                    <div class="stat-gallery">
+                        <div class="num"><?= $count ?></div>
+                        <div class="label"><?= $categories[$key] ?></div>
+                    </div>
+                <?php endforeach; ?>
+            </div>
+            
+            <!-- ФИЛЬТРЫ -->
+            <div class="gallery-filters">
+                <a href="?tab=gallery" class="<?= $gallery_filter === 'all' ? 'active' : '' ?>">📋 Все (<?= $total_photos ?>)</a>
+                <?php foreach ($categories as $key => $label): ?>
+                    <a href="?tab=gallery&gallery_filter=<?= $key ?>" class="<?= $gallery_filter === $key ? 'active' : '' ?>">
+                        <?= $label ?> (<?= $category_stats[$key] ?? 0 ?>)
+                    </a>
+                <?php endforeach; ?>
+            </div>
+            
+            <!-- ЗАГРУЗКА ФОТО -->
             <div class="card">
                 <h3>📤 Загрузить фото</h3>
-                <form method="POST" enctype="multipart/form-data">
-                    <input type="file" name="photo" accept="image/*" required style="display:block; margin-bottom:10px;">
-                    <button type="submit" class="btn">📤 Загрузить</button>
+                
+                <!-- Drop Zone -->
+                <div class="drop-zone" id="drop-zone">
+                    <span class="icon">📸</span>
+                    <p>Перетащите фото сюда или нажмите для выбора</p>
+                    <p style="font-size:0.8rem; color:#94a3b8;">Поддерживаются: JPG, PNG, GIF, WebP</p>
+                    <input type="file" id="file-input" accept="image/*" multiple style="display:none;">
+                    <button type="button" class="btn" id="browse-btn">📁 Выбрать файлы</button>
+                </div>
+                
+                <!-- Превью перед загрузкой -->
+                <div id="image-preview-container">
+                    <div style="display:flex; gap:10px; flex-wrap:wrap; justify-content:center;" id="preview-list"></div>
+                </div>
+                
+                <!-- Форма загрузки -->
+                <form method="POST" enctype="multipart/form-data" id="upload-form" style="margin-top:15px; display:none;">
+                    <input type="file" name="photo" accept="image/*" id="main-file-input" required>
+                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px; margin-top:15px;">
+                        <div class="form-group">
+                            <label>Название фото</label>
+                            <input type="text" name="photo_title" placeholder="Например: Наш цех" id="photo-title">
+                        </div>
+                        <div class="form-group">
+                            <label>Категория</label>
+                            <select name="photo_category">
+                                <?php foreach ($categories as $key => $label): ?>
+                                    <option value="<?= $key ?>"><?= $label ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                    </div>
+                    <button type="submit" class="btn" style="margin-top:10px;">📤 Загрузить</button>
+                    <button type="button" class="btn" style="background:#64748b; color:white; margin-top:10px;" onclick="document.getElementById('image-preview-container').style.display='none'; document.getElementById('upload-form').style.display='none';">✕ Отмена</button>
                 </form>
             </div>
-            <div class="gallery-grid">
-                <?php if (count($gallery) > 0): ?>
-                    <?php foreach ($gallery as $img): ?>
-                    <div class="gallery-item">
-                        <img src="<?= $img['path'] ?>" alt="Фото">
-                        <div class="info">
-                            <a href="?tab=gallery&delete_photo=<?= urlencode($img['filename']) ?>" onclick="return confirm('Удалить фото?')" style="color:#ef4444; text-decoration:none;">🗑️ Удалить</a>
+            
+            <!-- МАССОВОЕ УДАЛЕНИЕ -->
+            <?php if (count($filtered_gallery) > 0): ?>
+            <div class="card no-print">
+                <form method="POST" id="delete-selected-form" onsubmit="return confirm('Удалить выбранные фото?')">
+                    <div class="select-all-container">
+                        <input type="checkbox" id="select-all" onclick="toggleAll(this)">
+                        <label for="select-all"><strong>Выбрать всё</strong></label>
+                        <button type="submit" name="delete_selected" class="btn btn-sm btn-danger" style="padding:6px 20px;" onclick="return confirm('Удалить выбранные фото?')">🗑️ Удалить выбранные</button>
+                        <span style="color:#64748b; font-size:0.85rem;" id="selected-count">Выбрано: 0</span>
+                    </div>
+            </div>
+            <?php endif; ?>
+            
+            <!-- ГАЛЕРЕЯ -->
+            <div style="display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:20px;" id="gallery-grid">
+                <?php if (count($filtered_gallery) > 0): ?>
+                    <?php foreach ($filtered_gallery as $index => $img): ?>
+                    <div class="gallery-item" data-index="<?= $index ?>">
+                        <div class="gallery-image-container" onclick="openLightbox(<?= $index ?>)">
+                            <img src="<?= $img['path'] ?>" alt="<?= htmlspecialchars($img['title'] ?: 'Фото') ?>" loading="lazy">
+                            <?php if (count($filtered_gallery) > 0): ?>
+                            <div class="select-checkbox" onclick="event.stopPropagation();">
+                                <input type="checkbox" name="selected_photos[]" value="<?= htmlspecialchars($img['filename']) ?>" onchange="updateSelectedCount()">
+                            </div>
+                            <?php endif; ?>
+                        </div>
+                        <div class="gallery-info">
+                            <div class="gallery-title"><?= htmlspecialchars($img['title'] ?: 'Без названия') ?></div>
+                            <div class="gallery-category"><?= $categories[$img['category']] ?? 'Без категории' ?></div>
+                            <div class="gallery-date">📅 <?= isset($img['created_at']) ? date('d.m.Y', strtotime($img['created_at'])) : '' ?></div>
+                            <div class="gallery-actions">
+                                <button class="copy-btn" onclick="copyUrl('<?= $img['path'] ?>')">📋 Копировать ссылку</button>
+                                <a href="?tab=gallery&delete_photo=<?= urlencode($img['filename']) ?>" class="delete-btn" onclick="return confirm('Удалить фото?')">🗑️</a>
+                            </div>
                         </div>
                     </div>
                     <?php endforeach; ?>
                 <?php else: ?>
-                    <p style="color:#64748b;">Нет загруженных фото</p>
+                    <p style="color:#64748b; grid-column:1/-1; text-align:center; padding:40px;">📭 Фото не найдены</p>
                 <?php endif; ?>
             </div>
+            
+            <!-- ЛАЙТБОКС -->
+            <div class="lightbox" id="lightbox" onclick="if(event.target===this) closeLightbox()">
+                <span class="lightbox-close" onclick="closeLightbox()">✕</span>
+                <span class="lightbox-nav lightbox-prev" onclick="changeImage(-1)">‹</span>
+                <span class="lightbox-nav lightbox-next" onclick="changeImage(1)">›</span>
+                <div class="lightbox-content">
+                    <img id="lightbox-image" src="" alt="Увеличенное фото">
+                    <div class="lightbox-info" id="lightbox-info"></div>
+                </div>
+            </div>
+            
+            <script>
+                // ===== ПРЕДПРОСМОТР ПЕРЕД ЗАГРУЗКОЙ =====
+                const dropZone = document.getElementById('drop-zone');
+                const fileInput = document.getElementById('file-input');
+                const browseBtn = document.getElementById('browse-btn');
+                const previewContainer = document.getElementById('image-preview-container');
+                const previewList = document.getElementById('preview-list');
+                const uploadForm = document.getElementById('upload-form');
+                const mainFileInput = document.getElementById('main-file-input');
+                const photoTitle = document.getElementById('photo-title');
+                
+                let selectedFiles = [];
+                
+                // Клик по зоне загрузки
+                dropZone.addEventListener('click', function() {
+                    fileInput.click();
+                });
+                
+                // Клик по кнопке "Выбрать файлы"
+                browseBtn.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    fileInput.click();
+                });
+                
+                // Drag & Drop
+                dropZone.addEventListener('dragover', function(e) {
+                    e.preventDefault();
+                    this.classList.add('dragover');
+                });
+                
+                dropZone.addEventListener('dragleave', function(e) {
+                    e.preventDefault();
+                    this.classList.remove('dragover');
+                });
+                
+                dropZone.addEventListener('drop', function(e) {
+                    e.preventDefault();
+                    this.classList.remove('dragover');
+                    handleFiles(e.dataTransfer.files);
+                });
+                
+                // Выбор файлов
+                fileInput.addEventListener('change', function() {
+                    handleFiles(this.files);
+                    this.value = '';
+                });
+                
+                function handleFiles(files) {
+                    selectedFiles = [];
+                    previewList.innerHTML = '';
+                    
+                    for (let i = 0; i < files.length; i++) {
+                        const file = files[i];
+                        if (!file.type.startsWith('image/')) continue;
+                        selectedFiles.push(file);
+                        
+                        const reader = new FileReader();
+                        reader.onload = function(e) {
+                            const div = document.createElement('div');
+                            div.style.cssText = 'position:relative; display:inline-block;';
+                            const img = document.createElement('img');
+                            img.src = e.target.result;
+                            img.style.cssText = 'width:120px; height:100px; object-fit:cover; border-radius:10px; border:2px solid #e2e8f0;';
+                            div.appendChild(img);
+                            previewList.appendChild(div);
+                        };
+                        reader.readAsDataURL(file);
+                    }
+                    
+                    if (selectedFiles.length > 0) {
+                        previewContainer.style.display = 'block';
+                        uploadForm.style.display = 'block';
+                        // Берём первый файл для основной загрузки
+                        const dataTransfer = new DataTransfer();
+                        dataTransfer.items.add(selectedFiles[0]);
+                        mainFileInput.files = dataTransfer.files;
+                        // Заполняем название автоматически
+                        if (!photoTitle.value) {
+                            photoTitle.value = selectedFiles[0].name.replace(/\.[^/.]+$/, '');
+                        }
+                        dropZone.style.display = 'none';
+                    }
+                }
+                
+                // ===== ГАЛЕРЕЯ: ЛАЙТБОКС =====
+                let currentIndex = 0;
+                const galleryItems = document.querySelectorAll('.gallery-item');
+                
+                function openLightbox(index) {
+                    const items = document.querySelectorAll('.gallery-item');
+                    const filteredGallery = <?= json_encode(array_values($filtered_gallery)) ?>;
+                    if (index < 0 || index >= items.length) return;
+                    
+                    currentIndex = index;
+                    const img = document.getElementById('lightbox-image');
+                    const info = document.getElementById('lightbox-info');
+                    const item = filteredGallery[index];
+                    
+                    if (item) {
+                        img.src = item.path;
+                        info.textContent = (item.title || 'Без названия') + ' — ' + (<?= json_encode($categories) ?>[item.category] || 'Без категории');
+                    }
+                    document.getElementById('lightbox').style.display = 'flex';
+                    document.body.style.overflow = 'hidden';
+                }
+                
+                function closeLightbox() {
+                    document.getElementById('lightbox').style.display = 'none';
+                    document.body.style.overflow = 'auto';
+                }
+                
+                function changeImage(direction) {
+                    const items = document.querySelectorAll('.gallery-item');
+                    const newIndex = currentIndex + direction;
+                    if (newIndex < 0 || newIndex >= items.length) return;
+                    openLightbox(newIndex);
+                }
+                
+                // Клавиатура для лайтбокса
+                document.addEventListener('keydown', function(e) {
+                    if (document.getElementById('lightbox').style.display === 'flex') {
+                        if (e.key === 'Escape') closeLightbox();
+                        if (e.key === 'ArrowLeft') changeImage(-1);
+                        if (e.key === 'ArrowRight') changeImage(1);
+                    }
+                });
+                
+                // ===== КОПИРОВАНИЕ ССЫЛКИ =====
+                function copyUrl(path) {
+                    const url = window.location.origin + '/' + path;
+                    if (navigator.clipboard && navigator.clipboard.writeText) {
+                        navigator.clipboard.writeText(url).then(function() {
+                            alert('✅ Ссылка скопирована: ' + url);
+                        }).catch(function() {
+                            fallbackCopy(url);
+                        });
+                    } else {
+                        fallbackCopy(url);
+                    }
+                }
+                
+                function fallbackCopy(text) {
+                    const textarea = document.createElement('textarea');
+                    textarea.value = text;
+                    document.body.appendChild(textarea);
+                    textarea.select();
+                    try {
+                        document.execCommand('copy');
+                        alert('✅ Ссылка скопирована: ' + text);
+                    } catch (err) {
+                        alert('❌ Не удалось скопировать ссылку. Скопируйте вручную: ' + text);
+                    }
+                    document.body.removeChild(textarea);
+                }
+                
+                // ===== МАССОВОЕ УДАЛЕНИЕ =====
+                function toggleAll(checkbox) {
+                    const checkboxes = document.querySelectorAll('input[name="selected_photos[]"]');
+                    checkboxes.forEach(function(cb) {
+                        cb.checked = checkbox.checked;
+                    });
+                    updateSelectedCount();
+                }
+                
+                function updateSelectedCount() {
+                    const checkboxes = document.querySelectorAll('input[name="selected_photos[]"]:checked');
+                    document.getElementById('selected-count').textContent = 'Выбрано: ' + checkboxes.length;
+                }
+            </script>
         <?php endif; ?>
     </div>
 <?php endif; ?>
