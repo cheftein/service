@@ -1023,7 +1023,8 @@ if (isset($_GET['export_reviews']) && $_GET['export_reviews'] === 'csv') {
     </body>
     </html>
 <?php exit; ?>
-<?php endif; ?>
+
+<?php else: ?>
 
     <!-- САЙДБАР -->
     <div class="sidebar">
@@ -2035,6 +2036,7 @@ if (isset($_GET['export_reviews']) && $_GET['export_reviews'] === 'csv') {
             </script>
         <?php endif; ?>
     </div>
+
 <?php endif; ?>
 
 </body>
