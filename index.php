@@ -210,10 +210,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['order_submit'])) {
         </div>
         <div style="border-radius:20px; overflow:hidden; min-height:300px; background:#e9edf2;">
     <iframe 
-        src="https://yandex.ru/map-widget/v1/?um=constructor%3A1a2b3c4d5e6f7g8h9i0j&source=constructor" 
+        src="https://yandex.ru/map-widget/v1/?ll=47.251604%2C56.098763&z=16&pt=47.251604%2C56.098763&l=map" 
         width="100%" 
         height="300" 
-        frameborder="0"
+        frameborder="0" 
         style="border:none;">
     </iframe>
 </div>
