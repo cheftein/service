@@ -670,7 +670,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['order_submit'])) {
 <!-- ===== ШАПКА ===== -->
 <header class="header">
     <div class="container">
-        <div class="logo"><span>Авто</span>Мастер</div>
+        <div class="logo"><span>Авто</span>Тайм</div>
         <a href="tel:<?= preg_replace('/[^0-9]/', '', $settings['phone']) ?>" class="header-phone">📞 <?= $settings['phone'] ?></a>
     </div>
 </header>
