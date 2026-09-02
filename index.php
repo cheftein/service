@@ -125,7 +125,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['order_submit'])) {
                 <li>Сертифицированные мастера с опытом от 10 лет</li>
                 <li>Гарантия на все виды работ и запчасти</li>
                 <li>Прозрачные цены без скрытых доплат</li>
-                <li>Работаем без выходных с 9:00 до 21:00</li>
+                <li>Работаем в будние дни с 9:00 до 19:00</li>
             </ul>
         </div>
         <div style="background:#e9edf2; border-radius:20px; min-height:200px; display:flex; align-items:center; justify-content:center; color:#94a3b8; font-size:2rem;">
