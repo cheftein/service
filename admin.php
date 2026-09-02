@@ -339,12 +339,6 @@ if (isset($_GET['export_services']) && $_GET['export_services'] === 'csv') {
         }
         .new-order-blink { animation:pulse-new 1.5s infinite; font-weight:700; }
         
-        /* Модальное окно для редактирования */
-        .modal { display:none; position:fixed; z-index:1000; left:0; top:0; width:100%; height:100%; background:rgba(0,0,0,0.5); align-items:center; justify-content:center; }
-        .modal-content { background:white; padding:30px; border-radius:20px; max-width:600px; width:90%; max-height:90vh; overflow-y:auto; }
-        .modal-close { float:right; font-size:1.8rem; font-weight:700; cursor:pointer; color:#64748b; }
-        .modal-close:hover { color:#0b1a2e; }
-        
         /* Стили для карточек услуг на мобильных */
         .service-card-mobile { background:white; padding:15px; border-radius:12px; margin-bottom:10px; box-shadow:0 2px 10px rgba(0,0,0,0.05); border-left:4px solid #facc15; }
         .service-card-mobile .row { display:flex; justify-content:space-between; padding:5px 0; }
@@ -436,7 +430,15 @@ if (isset($_GET['export_services']) && $_GET['export_services'] === 'csv') {
                     <?php foreach ($settings as $key => $value): ?>
                         <div class="form-group">
                             <label><?= htmlspecialchars($key) ?></label>
-                            <input type="text" name="<?= $key ?>" value="<?= htmlspecialchars($value) ?>">
+                            <?php 
+                            // Определяем, какие поля должны быть многострочными
+                            $long_fields = ['about_text', 'hero_subtitle', 'address'];
+                            if (in_array($key, $long_fields) || strlen($value) > 60): 
+                            ?>
+                                <textarea name="<?= $key ?>" rows="3" style="width:100%; padding:12px; border:2px solid #e2e8f0; border-radius:10px; font-size:1rem; font-family:inherit; resize:vertical; min-height:80px;"><?= htmlspecialchars($value) ?></textarea>
+                            <?php else: ?>
+                                <input type="text" name="<?= $key ?>" value="<?= htmlspecialchars($value) ?>" style="width:100%; padding:12px; border:2px solid #e2e8f0; border-radius:10px; font-size:1rem;">
+                            <?php endif; ?>
                         </div>
                     <?php endforeach; ?>
                     <button type="submit" name="save_settings" class="btn">💾 Сохранить все</button>
