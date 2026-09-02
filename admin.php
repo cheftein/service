@@ -76,7 +76,9 @@ if ($is_logged_in) {
             'icon' => trim($_POST['service_icon']),
             'title' => trim($_POST['service_title']),
             'description' => trim($_POST['service_description']),
-            'price' => trim($_POST['service_price'])
+            'price' => trim($_POST['service_price']),
+            'category' => trim($_POST['service_category'] ?? 'all'),
+            'sort_order' => count(get_services()) + 1
         ];
         if ($service['title']) {
             add_service($service);
@@ -84,9 +86,51 @@ if ($is_logged_in) {
         }
     }
     
+    // Редактирование услуги
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_service'])) {
+        $id = (int)$_POST['edit_service_id'];
+        $data = [
+            'icon' => trim($_POST['edit_service_icon']),
+            'title' => trim($_POST['edit_service_title']),
+            'description' => trim($_POST['edit_service_description']),
+            'price' => trim($_POST['edit_service_price']),
+            'category' => trim($_POST['edit_service_category'] ?? 'all')
+        ];
+        if ($data['title'] && $id) {
+            update_service($id, $data);
+            $success = '✅ Услуга обновлена!';
+        }
+    }
+    
     // Удаление услуги
     if (isset($_GET['delete_service'])) {
         delete_service((int)$_GET['delete_service']);
+        header('Location: admin.php?tab=services');
+        exit;
+    }
+    
+    // Изменение порядка услуги (вверх/вниз)
+    if (isset($_GET['move_service']) && isset($_GET['direction'])) {
+        $id = (int)$_GET['move_service'];
+        $direction = $_GET['direction'];
+        $services = get_services();
+        $index = array_search($id, array_column($services, 'id'));
+        if ($index !== false) {
+            if ($direction === 'up' && $index > 0) {
+                $temp = $services[$index];
+                $services[$index] = $services[$index - 1];
+                $services[$index - 1] = $temp;
+            } elseif ($direction === 'down' && $index < count($services) - 1) {
+                $temp = $services[$index];
+                $services[$index] = $services[$index + 1];
+                $services[$index + 1] = $temp;
+            }
+            // Обновляем sort_order
+            foreach ($services as $i => &$s) {
+                $s['sort_order'] = $i + 1;
+            }
+            save_data('services.json', $services);
+        }
         header('Location: admin.php?tab=services');
         exit;
     }
@@ -116,6 +160,82 @@ $reviews = get_reviews();
 $orders = get_orders();
 $gallery = get_gallery();
 $new_orders_count = count(array_filter($orders, function($o) { return $o['status'] === 'new'; }));
+
+// Для редактирования услуги
+$edit_service_id = isset($_GET['edit_service']) ? (int)$_GET['edit_service'] : 0;
+$edit_service_data = null;
+if ($edit_service_id) {
+    foreach ($services as $s) {
+        if ($s['id'] === $edit_service_id) {
+            $edit_service_data = $s;
+            break;
+        }
+    }
+}
+
+// Поиск по услугам
+$search_service = $_GET['search_service'] ?? '';
+$filtered_services = $services;
+if ($search_service) {
+    $search_lower = mb_strtolower($search_service);
+    $filtered_services = array_filter($filtered_services, function($s) use ($search_lower) {
+        return mb_strpos(mb_strtolower($s['title']), $search_lower) !== false ||
+               mb_strpos(mb_strtolower($s['description']), $search_lower) !== false;
+    });
+}
+
+// Сортировка по полю sort_order
+usort($filtered_services, function($a, $b) {
+    return ($a['sort_order'] ?? 0) - ($b['sort_order'] ?? 0);
+});
+
+// Категории для фильтра
+$categories = ['all' => 'Все', 'repair' => '🔧 Ремонт', 'diagnostic' => '🖥️ Диагностика', 'replacement' => '⛽ Замена', 'tires' => '🛞 Шиномонтаж'];
+$category_filter = $_GET['category'] ?? 'all';
+if ($category_filter !== 'all') {
+    $filtered_services = array_filter($filtered_services, function($s) use ($category_filter) {
+        return ($s['category'] ?? 'all') === $category_filter;
+    });
+}
+
+// Статистика услуг
+$total_services = count($services);
+$categories_count = [];
+foreach ($categories as $key => $label) {
+    if ($key === 'all') continue;
+    $categories_count[$key] = count(array_filter($services, function($s) use ($key) {
+        return ($s['category'] ?? 'all') === $key;
+    }));
+}
+$max_price = 0;
+$max_price_service = '';
+foreach ($services as $s) {
+    $price_num = (int)preg_replace('/[^0-9]/', '', $s['price']);
+    if ($price_num > $max_price) {
+        $max_price = $price_num;
+        $max_price_service = $s['title'];
+    }
+}
+
+// Экспорт услуг в CSV
+if (isset($_GET['export_services']) && $_GET['export_services'] === 'csv') {
+    header('Content-Type: text/csv; charset=utf-8');
+    header('Content-Disposition: attachment; filename=uslugi_' . date('Y-m-d') . '.csv');
+    $output = fopen('php://output', 'w');
+    fputcsv($output, ['ID', 'Иконка', 'Название', 'Описание', 'Цена', 'Категория']);
+    foreach ($filtered_services as $s) {
+        fputcsv($output, [
+            $s['id'],
+            $s['icon'],
+            $s['title'],
+            $s['description'],
+            $s['price'],
+            $categories[$s['category'] ?? 'all'] ?? 'Без категории'
+        ]);
+    }
+    fclose($output);
+    exit;
+}
 ?>
 <!DOCTYPE html>
 <html lang="ru">
@@ -148,11 +268,16 @@ $new_orders_count = count(array_filter($orders, function($o) { return $o['status
         .btn-danger { background:#ef4444; color:white; }
         .btn-danger:hover { background:#dc2626; }
         .btn-sm { padding:5px 15px; font-size:0.85rem; }
+        .btn-success { background:#22c55e; color:white; }
+        .btn-success:hover { background:#16a34a; }
+        .btn-primary { background:#3b82f6; color:white; }
+        .btn-primary:hover { background:#2563eb; }
         .success { background:#bbf7d0; color:#15803d; padding:15px; border-radius:10px; margin-bottom:20px; }
         .error { background:#fee2e2; color:#dc2626; padding:15px; border-radius:10px; margin-bottom:20px; }
         .table { width:100%; border-collapse:collapse; }
         .table th, .table td { padding:12px; text-align:left; border-bottom:1px solid #e2e8f0; }
         .table th { background:#f8fafc; font-weight:600; }
+        .table .service-icon { font-size:1.8rem; }
         .gallery-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:15px; }
         .gallery-item { background:white; border-radius:10px; overflow:hidden; box-shadow:0 2px 5px rgba(0,0,0,0.1); }
         .gallery-item img { width:100%; height:150px; object-fit:cover; }
@@ -167,7 +292,7 @@ $new_orders_count = count(array_filter($orders, function($o) { return $o['status
         .status-done { background:#bbf7d0; color:#15803d; }
         .logout-link { color:#ef4444; margin-top:20px; display:block; text-decoration:none; }
         .logout-link:hover { color:#dc2626; }
-        .flex-between { display:flex; justify-content:space-between; align-items:center; }
+        .flex-between { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; }
         
         /* Стили для вкладки Заявки */
         .stats-orders { display:grid; grid-template-columns:repeat(4,1fr); gap:15px; margin-bottom:25px; }
@@ -185,6 +310,7 @@ $new_orders_count = count(array_filter($orders, function($o) { return $o['status
         .filters a.active-new { background:#fef3c7; color:#92400e; }
         .filters a.active-processed { background:#dbeafe; color:#1e40af; }
         .filters a.active-done { background:#bbf7d0; color:#15803d; }
+        .filters a.active-category { background:#0b1a2e; color:white; }
         
         .order-row-new { background:#fef3c7; }
         .order-row-processed { background:#dbeafe; }
@@ -212,6 +338,25 @@ $new_orders_count = count(array_filter($orders, function($o) { return $o['status
             50% { opacity:0.6; }
         }
         .new-order-blink { animation:pulse-new 1.5s infinite; font-weight:700; }
+        
+        /* Модальное окно для редактирования */
+        .modal { display:none; position:fixed; z-index:1000; left:0; top:0; width:100%; height:100%; background:rgba(0,0,0,0.5); align-items:center; justify-content:center; }
+        .modal-content { background:white; padding:30px; border-radius:20px; max-width:600px; width:90%; max-height:90vh; overflow-y:auto; }
+        .modal-close { float:right; font-size:1.8rem; font-weight:700; cursor:pointer; color:#64748b; }
+        .modal-close:hover { color:#0b1a2e; }
+        
+        /* Стили для карточек услуг на мобильных */
+        .service-card-mobile { background:white; padding:15px; border-radius:12px; margin-bottom:10px; box-shadow:0 2px 10px rgba(0,0,0,0.05); border-left:4px solid #facc15; }
+        .service-card-mobile .row { display:flex; justify-content:space-between; padding:5px 0; }
+        .service-card-mobile .actions { margin-top:10px; display:flex; gap:10px; flex-wrap:wrap; }
+        .service-card-mobile .icon-big { font-size:2.5rem; }
+        
+        .service-category-badge { display:inline-block; padding:2px 12px; border-radius:20px; font-size:0.75rem; font-weight:600; }
+        .category-repair { background:#fef3c7; color:#92400e; }
+        .category-diagnostic { background:#dbeafe; color:#1e40af; }
+        .category-replacement { background:#bbf7d0; color:#15803d; }
+        .category-tires { background:#fce7f3; color:#9d174d; }
+        .category-all { background:#e2e8f0; color:#475569; }
         
         @media(max-width:768px){
             body { flex-direction:column; }
@@ -300,37 +445,244 @@ $new_orders_count = count(array_filter($orders, function($o) { return $o['status
         <?php endif; ?>
 
         <?php if ($tab === 'services'): ?>
-            <h1 style="margin-bottom:20px;">🔧 Управление услугами</h1>
-            <div class="card">
-                <h3>➕ Добавить услугу</h3>
-                <form method="POST">
-                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
-                        <input type="text" name="service_icon" placeholder="Иконка (🔧)" style="padding:12px; border:2px solid #e2e8f0; border-radius:10px;">
-                        <input type="text" name="service_title" placeholder="Название" style="padding:12px; border:2px solid #e2e8f0; border-radius:10px;">
-                        <input type="text" name="service_description" placeholder="Описание" style="padding:12px; border:2px solid #e2e8f0; border-radius:10px;">
-                        <input type="text" name="service_price" placeholder="Цена (например: от 5 000 ₽)" style="padding:12px; border:2px solid #e2e8f0; border-radius:10px;">
+            <?php
+            // Получаем список услуг
+            $all_services = get_services();
+            // Сортировка по sort_order
+            usort($all_services, function($a, $b) {
+                return ($a['sort_order'] ?? 0) - ($b['sort_order'] ?? 0);
+            });
+            
+            // Поиск
+            $search_service = $_GET['search_service'] ?? '';
+            $filtered_services = $all_services;
+            if ($search_service) {
+                $search_lower = mb_strtolower($search_service);
+                $filtered_services = array_filter($filtered_services, function($s) use ($search_lower) {
+                    return mb_strpos(mb_strtolower($s['title']), $search_lower) !== false ||
+                           mb_strpos(mb_strtolower($s['description']), $search_lower) !== false;
+                });
+            }
+            
+            // Фильтр по категории
+            $category_filter = $_GET['category'] ?? 'all';
+            if ($category_filter !== 'all') {
+                $filtered_services = array_filter($filtered_services, function($s) use ($category_filter) {
+                    return ($s['category'] ?? 'all') === $category_filter;
+                });
+            }
+            
+            // Категории
+            $categories = [
+                'all' => '📋 Все',
+                'repair' => '🔧 Ремонт',
+                'diagnostic' => '🖥️ Диагностика',
+                'replacement' => '⛽ Замена',
+                'tires' => '🛞 Шиномонтаж'
+            ];
+            
+            // Статистика по категориям
+            $stats_categories = [];
+            foreach ($categories as $key => $label) {
+                if ($key === 'all') continue;
+                $stats_categories[$key] = count(array_filter($all_services, function($s) use ($key) {
+                    return ($s['category'] ?? 'all') === $key;
+                }));
+            }
+            
+            // Самая дорогая услуга
+            $max_price = 0;
+            $max_price_service = '—';
+            foreach ($all_services as $s) {
+                $price_num = (int)preg_replace('/[^0-9]/', '', $s['price']);
+                if ($price_num > $max_price) {
+                    $max_price = $price_num;
+                    $max_price_service = $s['title'];
+                }
+            }
+            ?>
+            
+            <div class="flex-between" style="margin-bottom:20px;">
+                <h1>🔧 Управление услугами</h1>
+                <div style="display:flex; gap:10px;">
+                    <a href="?tab=services&export_services=csv<?= $search_service ? '&search_service='.urlencode($search_service) : '' ?><?= $category_filter !== 'all' ? '&category='.$category_filter : '' ?>" class="btn btn-sm btn-success" onclick="return confirm('Экспортировать услуги в CSV?')">📥 CSV</a>
+                    <button class="btn btn-sm btn-primary" onclick="window.print()">🖨️ Печать</button>
+                </div>
+            </div>
+            
+            <!-- СТАТИСТИКА -->
+            <div class="stats" style="margin-bottom:20px;">
+                <div class="stat">
+                    <div class="num"><?= count($all_services) ?></div>
+                    <div class="label">📊 Всего услуг</div>
+                </div>
+                <?php foreach ($stats_categories as $key => $count): ?>
+                    <div class="stat">
+                        <div class="num"><?= $count ?></div>
+                        <div class="label"><?= $categories[$key] ?></div>
                     </div>
-                    <button type="submit" name="add_service" class="btn" style="margin-top:10px;">➕ Добавить услугу</button>
+                <?php endforeach; ?>
+                <div class="stat">
+                    <div class="num" style="font-size:1.2rem; color:#facc15;">💎 <?= $max_price_service ?></div>
+                    <div class="label">Самая дорогая</div>
+                </div>
+            </div>
+            
+            <!-- ФИЛЬТРЫ ПО КАТЕГОРИЯМ -->
+            <div class="filters">
+                <?php foreach ($categories as $key => $label): ?>
+                    <a href="?tab=services&category=<?= $key ?><?= $search_service ? '&search_service='.urlencode($search_service) : '' ?>" class="<?= $category_filter === $key ? 'active-category' : '' ?>">
+                        <?= $label ?> (<?= $key === 'all' ? count($all_services) : ($stats_categories[$key] ?? 0) ?>)
+                    </a>
+                <?php endforeach; ?>
+            </div>
+            
+            <!-- ПОИСК -->
+            <div class="export-buttons">
+                <form method="GET" style="display:flex; gap:10px; flex-wrap:wrap; flex:1;">
+                    <input type="hidden" name="tab" value="services">
+                    <?php if ($category_filter !== 'all'): ?>
+                        <input type="hidden" name="category" value="<?= htmlspecialchars($category_filter) ?>">
+                    <?php endif; ?>
+                    <input type="text" name="search_service" placeholder="🔍 Поиск по названию или описанию..." value="<?= htmlspecialchars($search_service) ?>" style="padding:8px 15px; border:2px solid #e2e8f0; border-radius:20px; flex:1; min-width:200px;">
+                    <button type="submit" class="btn-sm" style="background:#0b1a2e; color:white;">🔍 Найти</button>
+                    <?php if ($search_service): ?>
+                        <a href="?tab=services<?= $category_filter !== 'all' ? '&category='.$category_filter : '' ?>" class="btn-sm" style="background:#ef4444; color:white; text-decoration:none;">✕ Сбросить</a>
+                    <?php endif; ?>
                 </form>
             </div>
+            
+            <!-- ДОБАВЛЕНИЕ УСЛУГИ -->
             <div class="card">
-                <h3>📋 Список услуг</h3>
-                <table class="table">
-                    <thead>
-                        <tr><th>#</th><th>Иконка</th><th>Название</th><th>Цена</th><th>Действие</th></tr>
-                    </thead>
-                    <tbody>
-                        <?php foreach ($services as $s): ?>
-                        <tr>
-                            <td><?= $s['id'] ?></td>
-                            <td><?= $s['icon'] ?></td>
-                            <td><?= $s['title'] ?></td>
-                            <td><?= $s['price'] ?></td>
-                            <td><a href="?tab=services&delete_service=<?= $s['id'] ?>" onclick="return confirm('Удалить услугу?')" style="color:#ef4444; text-decoration:none;">🗑️ Удалить</a></td>
-                        </tr>
-                        <?php endforeach; ?>
-                    </tbody>
-                </table>
+                <h3><?= $edit_service_data ? '✏️ Редактировать услугу' : '➕ Добавить услугу' ?></h3>
+                <form method="POST">
+                    <?php if ($edit_service_data): ?>
+                        <input type="hidden" name="edit_service_id" value="<?= $edit_service_data['id'] ?>">
+                    <?php endif; ?>
+                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px;">
+                        <div class="form-group">
+                            <label>Иконка (эмодзи)</label>
+                            <input type="text" name="<?= $edit_service_data ? 'edit_service_icon' : 'service_icon' ?>" placeholder="🔧" value="<?= $edit_service_data ? htmlspecialchars($edit_service_data['icon']) : '' ?>" style="font-size:1.5rem; width:80px;">
+                        </div>
+                        <div class="form-group">
+                            <label>Категория</label>
+                            <select name="<?= $edit_service_data ? 'edit_service_category' : 'service_category' ?>">
+                                <?php foreach ($categories as $key => $label): ?>
+                                    <?php if ($key === 'all') continue; ?>
+                                    <option value="<?= $key ?>" <?= $edit_service_data && ($edit_service_data['category'] ?? 'all') === $key ? 'selected' : '' ?>><?= $label ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Название услуги</label>
+                            <input type="text" name="<?= $edit_service_data ? 'edit_service_title' : 'service_title' ?>" placeholder="Например: Ремонт двигателя" value="<?= $edit_service_data ? htmlspecialchars($edit_service_data['title']) : '' ?>" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Цена</label>
+                            <input type="text" name="<?= $edit_service_data ? 'edit_service_price' : 'service_price' ?>" placeholder="от 5 000 ₽" value="<?= $edit_service_data ? htmlspecialchars($edit_service_data['price']) : '' ?>">
+                        </div>
+                        <div class="form-group" style="grid-column: span 2;">
+                            <label>Описание</label>
+                            <textarea name="<?= $edit_service_data ? 'edit_service_description' : 'service_description' ?>" placeholder="Краткое описание услуги..." rows="2"><?= $edit_service_data ? htmlspecialchars($edit_service_data['description']) : '' ?></textarea>
+                        </div>
+                    </div>
+                    <button type="submit" name="<?= $edit_service_data ? 'edit_service' : 'add_service' ?>" class="btn">
+                        <?= $edit_service_data ? '💾 Сохранить изменения' : '➕ Добавить услугу' ?>
+                    </button>
+                    <?php if ($edit_service_data): ?>
+                        <a href="?tab=services" class="btn" style="background:#64748b; color:white; text-decoration:none; margin-left:10px;">✕ Отмена</a>
+                    <?php endif; ?>
+                </form>
+            </div>
+            
+            <!-- СПИСОК УСЛУГ -->
+            <div class="card">
+                <h3>📋 Список услуг (<?= count($filtered_services) ?>)</h3>
+                
+                <?php if (count($filtered_services) > 0): ?>
+                    <div style="overflow-x:auto;">
+                        <table class="table" id="servicesTable">
+                            <thead>
+                                <tr>
+                                    <th style="width:50px;">#</th>
+                                    <th style="width:60px;">Иконка</th>
+                                    <th>Название</th>
+                                    <th>Категория</th>
+                                    <th>Цена</th>
+                                    <th style="width:120px;">Порядок</th>
+                                    <th style="width:180px;">Действие</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php foreach ($filtered_services as $index => $s): ?>
+                                <tr id="service-row-<?= $s['id'] ?>">
+                                    <td><?= $s['id'] ?></td>
+                                    <td style="font-size:1.8rem; text-align:center;"><?= $s['icon'] ?></td>
+                                    <td>
+                                        <strong><?= htmlspecialchars($s['title']) ?></strong>
+                                        <br><span style="color:#64748b; font-size:0.85rem;"><?= htmlspecialchars($s['description']) ?></span>
+                                    </td>
+                                    <td>
+                                        <?php 
+                                        $cat_key = $s['category'] ?? 'all';
+                                        $cat_class = 'category-all';
+                                        if ($cat_key === 'repair') $cat_class = 'category-repair';
+                                        elseif ($cat_key === 'diagnostic') $cat_class = 'category-diagnostic';
+                                        elseif ($cat_key === 'replacement') $cat_class = 'category-replacement';
+                                        elseif ($cat_key === 'tires') $cat_class = 'category-tires';
+                                        ?>
+                                        <span class="service-category-badge <?= $cat_class ?>">
+                                            <?= $categories[$cat_key] ?? 'Без категории' ?>
+                                        </span>
+                                    </td>
+                                    <td><strong><?= $s['price'] ?></strong></td>
+                                    <td>
+                                        <div style="display:flex; gap:5px; align-items:center;">
+                                            <?php if ($index > 0): ?>
+                                                <a href="?tab=services&move_service=<?= $s['id'] ?>&direction=up" style="text-decoration:none; font-size:1.2rem;" title="Переместить вверх">⬆️</a>
+                                            <?php else: ?>
+                                                <span style="opacity:0.3; font-size:1.2rem;">⬆️</span>
+                                            <?php endif; ?>
+                                            <span style="color:#64748b; font-size:0.8rem;"><?= $index + 1 ?></span>
+                                            <?php if ($index < count($filtered_services) - 1): ?>
+                                                <a href="?tab=services&move_service=<?= $s['id'] ?>&direction=down" style="text-decoration:none; font-size:1.2rem;" title="Переместить вниз">⬇️</a>
+                                            <?php else: ?>
+                                                <span style="opacity:0.3; font-size:1.2rem;">⬇️</span>
+                                            <?php endif; ?>
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                                            <a href="?tab=services&edit_service=<?= $s['id'] ?>" class="btn btn-sm btn-primary" style="text-decoration:none; color:white; padding:4px 12px; border-radius:6px; font-size:0.8rem;">✏️</a>
+                                            <a href="?tab=services&delete_service=<?= $s['id'] ?>" onclick="return confirm('Удалить услугу &quot;<?= htmlspecialchars($s['title']) ?>&quot;?')" style="color:#ef4444; text-decoration:none; padding:4px 8px; border:1px solid #ef4444; border-radius:6px; font-size:0.8rem;">🗑️</a>
+                                        </div>
+                                    </td>
+                                </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                <?php else: ?>
+                    <p style="color:#64748b; text-align:center; padding:30px;">📭 Услуг не найдено</p>
+                <?php endif; ?>
+            </div>
+            
+            <!-- ПРЕВЬЮ УСЛУГ (КАК НА САЙТЕ) -->
+            <div class="card">
+                <h3>👁️ Превью услуг (как на сайте)</h3>
+                <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:15px; margin-top:15px;">
+                    <?php 
+                    $preview_services = array_slice($all_services, 0, 4);
+                    foreach ($preview_services as $s): 
+                    ?>
+                    <div style="background:#f8f9fa; padding:20px; border-radius:15px; text-align:center; border:1px solid #e9edf2;">
+                        <div style="font-size:2.5rem;"><?= $s['icon'] ?></div>
+                        <h4 style="margin:10px 0 5px;"><?= htmlspecialchars($s['title']) ?></h4>
+                        <p style="color:#64748b; font-size:0.85rem;"><?= htmlspecialchars($s['description']) ?></p>
+                        <span style="display:inline-block; margin-top:10px; background:#0b1a2e; color:#facc15; padding:4px 15px; border-radius:20px; font-weight:600; font-size:0.85rem;"><?= $s['price'] ?></span>
+                    </div>
+                    <?php endforeach; ?>
+                </div>
             </div>
         <?php endif; ?>
 
