@@ -63,7 +63,7 @@ if ($is_logged_in) {
         exit;
     }
     
-    // Обновление статуса заявки
+    // Обновление статуса заявки (обычный GET)
     if (isset($_GET['update_status']) && isset($_GET['status'])) {
         update_order_status((int)$_GET['update_status'], $_GET['status']);
         header('Location: admin.php?tab=orders');
@@ -168,7 +168,65 @@ $new_orders_count = count(array_filter($orders, function($o) { return $o['status
         .logout-link { color:#ef4444; margin-top:20px; display:block; text-decoration:none; }
         .logout-link:hover { color:#dc2626; }
         .flex-between { display:flex; justify-content:space-between; align-items:center; }
-        @media(max-width:768px){ body { flex-direction:column; } .sidebar { width:100%; min-height:auto; } .stats { grid-template-columns:1fr 1fr; } }
+        
+        /* Стили для вкладки Заявки */
+        .stats-orders { display:grid; grid-template-columns:repeat(4,1fr); gap:15px; margin-bottom:25px; }
+        .stat-order { background:white; padding:15px 20px; border-radius:12px; box-shadow:0 2px 10px rgba(0,0,0,0.05); text-align:center; }
+        .stat-order .num { font-size:2rem; font-weight:700; }
+        .stat-order .label { color:#64748b; font-size:0.9rem; }
+        .stat-order .num.new { color:#92400e; }
+        .stat-order .num.processed { color:#1e40af; }
+        .stat-order .num.done { color:#15803d; }
+        
+        .filters { display:flex; gap:10px; margin-bottom:20px; flex-wrap:wrap; }
+        .filters a { padding:8px 20px; border-radius:20px; text-decoration:none; font-size:0.9rem; transition:0.3s; background:#f1f5f9; color:#64748b; }
+        .filters a:hover { background:#e2e8f0; }
+        .filters a.active { background:#0b1a2e; color:white; }
+        .filters a.active-new { background:#fef3c7; color:#92400e; }
+        .filters a.active-processed { background:#dbeafe; color:#1e40af; }
+        .filters a.active-done { background:#bbf7d0; color:#15803d; }
+        
+        .order-row-new { background:#fef3c7; }
+        .order-row-processed { background:#dbeafe; }
+        .order-row-done { background:#f0fdf4; }
+        
+        .order-card-mobile { background:white; padding:15px; border-radius:12px; margin-bottom:10px; box-shadow:0 2px 10px rgba(0,0,0,0.05); border-left:4px solid #e2e8f0; }
+        .order-card-mobile.new { border-left-color:#f59e0b; }
+        .order-card-mobile.processed { border-left-color:#3b82f6; }
+        .order-card-mobile.done { border-left-color:#22c55e; }
+        .order-card-mobile .row { display:flex; justify-content:space-between; padding:5px 0; }
+        .order-card-mobile .actions { margin-top:10px; display:flex; gap:10px; flex-wrap:wrap; }
+        
+        .status-select { padding:4px 8px; border-radius:6px; border:1px solid #e2e8f0; font-size:0.85rem; }
+        
+        .export-buttons { display:flex; gap:10px; margin-bottom:20px; flex-wrap:wrap; }
+        .export-buttons .btn-sm { background:#f1f5f9; color:#0b1a2e; padding:8px 20px; border-radius:20px; text-decoration:none; font-size:0.9rem; border:none; cursor:pointer; transition:0.3s; }
+        .export-buttons .btn-sm:hover { background:#e2e8f0; }
+        .export-buttons .btn-sm.export-csv { background:#22c55e; color:white; }
+        .export-buttons .btn-sm.export-csv:hover { background:#16a34a; }
+        .export-buttons .btn-sm.print { background:#3b82f6; color:white; }
+        .export-buttons .btn-sm.print:hover { background:#2563eb; }
+        
+        @keyframes pulse-new {
+            0%, 100% { opacity:1; }
+            50% { opacity:0.6; }
+        }
+        .new-order-blink { animation:pulse-new 1.5s infinite; font-weight:700; }
+        
+        @media(max-width:768px){
+            body { flex-direction:column; }
+            .sidebar { width:100%; min-height:auto; }
+            .stats { grid-template-columns:1fr 1fr; }
+            .stats-orders { grid-template-columns:1fr 1fr; }
+            .filters { gap:5px; }
+            .filters a { padding:5px 12px; font-size:0.8rem; }
+            .export-buttons { gap:5px; }
+        }
+        @media print {
+            .sidebar, .filters, .export-buttons, .no-print { display:none !important; }
+            .main { padding:0 !important; }
+            .order-row-new, .order-row-processed, .order-row-done { background:none !important; }
+        }
     </style>
 </head>
 <body>
@@ -318,38 +376,218 @@ $new_orders_count = count(array_filter($orders, function($o) { return $o['status
         <?php endif; ?>
 
         <?php if ($tab === 'orders'): ?>
-            <h1 style="margin-bottom:20px;">📩 Заявки</h1>
-            <div class="card">
-                <?php if (count($orders) > 0): ?>
-                    <table class="table">
-                        <thead>
-                            <tr><th>#</th><th>Имя</th><th>Телефон</th><th>Услуга</th><th>Дата</th><th>Статус</th><th>Действие</th></tr>
-                        </thead>
-                        <tbody>
-                            <?php foreach ($orders as $o): ?>
-                            <tr>
+            <?php
+            // Получаем параметры фильтра
+            $filter = $_GET['filter'] ?? 'all';
+            $search = $_GET['search'] ?? '';
+            
+            // Фильтрация заявок
+            $filtered_orders = $orders;
+            if ($filter !== 'all') {
+                $filtered_orders = array_filter($filtered_orders, function($o) use ($filter) {
+                    return $o['status'] === $filter;
+                });
+            }
+            if ($search) {
+                $search_lower = mb_strtolower($search);
+                $filtered_orders = array_filter($filtered_orders, function($o) use ($search_lower) {
+                    return mb_strpos(mb_strtolower($o['name']), $search_lower) !== false ||
+                           mb_strpos($o['phone'], $search_lower) !== false;
+                });
+            }
+            // Сортировка: сначала новые
+            usort($filtered_orders, function($a, $b) {
+                if ($a['status'] === 'new' && $b['status'] !== 'new') return -1;
+                if ($a['status'] !== 'new' && $b['status'] === 'new') return 1;
+                return strtotime($b['created_at'] ?? '0') - strtotime($a['created_at'] ?? '0');
+            });
+            
+            // Статистика
+            $total = count($orders);
+            $new_count = count(array_filter($orders, function($o) { return $o['status'] === 'new'; }));
+            $processed_count = count(array_filter($orders, function($o) { return $o['status'] === 'processed'; }));
+            $done_count = count(array_filter($orders, function($o) { return $o['status'] === 'done'; }));
+            $filtered_count = count($filtered_orders);
+            
+            // Обработка AJAX запроса для изменения статуса
+            if (isset($_POST['ajax_status_update'])) {
+                $id = (int)$_POST['id'];
+                $status = $_POST['status'] ?? '';
+                if ($id && $status) {
+                    update_order_status($id, $status);
+                    echo json_encode(['success' => true]);
+                } else {
+                    echo json_encode(['success' => false]);
+                }
+                exit;
+            }
+            
+            // Обработка экспорта CSV
+            if (isset($_GET['export']) && $_GET['export'] === 'csv') {
+                header('Content-Type: text/csv; charset=utf-8');
+                header('Content-Disposition: attachment; filename=zayavki_' . date('Y-m-d') . '.csv');
+                $output = fopen('php://output', 'w');
+                fputcsv($output, ['ID', 'Имя', 'Телефон', 'Услуга', 'Дата', 'Статус', 'Комментарий']);
+                foreach ($filtered_orders as $o) {
+                    fputcsv($output, [
+                        $o['id'],
+                        $o['name'],
+                        $o['phone'],
+                        $o['service'] ?? '',
+                        $o['date'] ?? '',
+                        $o['status'],
+                        $o['comment'] ?? ''
+                    ]);
+                }
+                fclose($output);
+                exit;
+            }
+            ?>
+            
+            <h1 style="margin-bottom:10px;">📩 Заявки</h1>
+            <p style="color:#64748b; margin-bottom:20px;">Управление входящими заявками от клиентов</p>
+            
+            <!-- СТАТИСТИКА -->
+            <div class="stats-orders">
+                <div class="stat-order">
+                    <div class="num"><?= $total ?></div>
+                    <div class="label">📊 Всего</div>
+                </div>
+                <div class="stat-order">
+                    <div class="num new <?= $new_count > 0 ? 'new-order-blink' : '' ?>"><?= $new_count ?></div>
+                    <div class="label">🆕 Новые</div>
+                </div>
+                <div class="stat-order">
+                    <div class="num processed"><?= $processed_count ?></div>
+                    <div class="label">🔄 В работе</div>
+                </div>
+                <div class="stat-order">
+                    <div class="num done"><?= $done_count ?></div>
+                    <div class="label">✅ Выполнено</div>
+                </div>
+            </div>
+            
+            <!-- ФИЛЬТРЫ -->
+            <div class="filters">
+                <a href="?tab=orders" class="<?= $filter === 'all' ? 'active' : '' ?>">📋 Все (<?= $total ?>)</a>
+                <a href="?tab=orders&filter=new" class="<?= $filter === 'new' ? 'active-new' : '' ?>">🆕 Новые (<?= $new_count ?>)</a>
+                <a href="?tab=orders&filter=processed" class="<?= $filter === 'processed' ? 'active-processed' : '' ?>">🔄 В работе (<?= $processed_count ?>)</a>
+                <a href="?tab=orders&filter=done" class="<?= $filter === 'done' ? 'active-done' : '' ?>">✅ Выполнено (<?= $done_count ?>)</a>
+            </div>
+            
+            <!-- ПОИСК И ЭКСПОРТ -->
+            <div class="export-buttons">
+                <form method="GET" style="display:flex; gap:10px; flex-wrap:wrap; flex:1;">
+                    <input type="hidden" name="tab" value="orders">
+                    <?php if ($filter !== 'all'): ?>
+                        <input type="hidden" name="filter" value="<?= htmlspecialchars($filter) ?>">
+                    <?php endif; ?>
+                    <input type="text" name="search" placeholder="🔍 Поиск по имени или телефону..." value="<?= htmlspecialchars($search) ?>" style="padding:8px 15px; border:2px solid #e2e8f0; border-radius:20px; flex:1; min-width:200px;">
+                    <button type="submit" class="btn-sm" style="background:#0b1a2e; color:white;">🔍 Найти</button>
+                    <?php if ($search): ?>
+                        <a href="?tab=orders<?= $filter !== 'all' ? '&filter='.$filter : '' ?>" class="btn-sm" style="background:#ef4444; color:white; text-decoration:none;">✕ Сбросить</a>
+                    <?php endif; ?>
+                </form>
+                <a href="?tab=orders&export=csv<?= $filter !== 'all' ? '&filter='.$filter : '' ?><?= $search ? '&search='.urlencode($search) : '' ?>" class="btn-sm export-csv" onclick="return confirm('Экспортировать все отфильтрованные заявки в CSV?')">📥 CSV</a>
+                <button class="btn-sm print" onclick="window.print()">🖨️ Печать</button>
+            </div>
+            
+            <!-- ТАБЛИЦА (ДЛЯ ПК) -->
+            <div class="card" style="overflow-x:auto;" id="ordersTable">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>📛 Имя</th>
+                            <th>📞 Телефон</th>
+                            <th>🔧 Услуга</th>
+                            <th>📅 Дата</th>
+                            <th>🕐 Создано</th>
+                            <th>📌 Статус</th>
+                            <th>⚡ Действие</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php if ($filtered_count > 0): ?>
+                            <?php foreach ($filtered_orders as $o): ?>
+                            <tr class="order-row-<?= $o['status'] ?>" id="order-<?= $o['id'] ?>">
                                 <td><?= $o['id'] ?></td>
-                                <td><?= htmlspecialchars($o['name']) ?></td>
-                                <td><?= htmlspecialchars($o['phone']) ?></td>
-                                <td><?= htmlspecialchars($o['service']) ?></td>
-                                <td><?= $o['date'] ?? '-' ?></td>
-                                <td><span class="status-badge status-<?= $o['status'] ?>"><?= $o['status'] ?></span></td>
+                                <td><strong><?= htmlspecialchars($o['name']) ?></strong></td>
+                                <td><a href="tel:<?= htmlspecialchars($o['phone']) ?>" style="color:#3b82f6; text-decoration:none;"><?= htmlspecialchars($o['phone']) ?></a></td>
+                                <td><?= htmlspecialchars($o['service'] ?? '-') ?></td>
+                                <td><?= $o['date'] ? date('d.m.Y H:i', strtotime($o['date'])) : '-' ?></td>
+                                <td style="font-size:0.85rem; color:#64748b;">
+                                    <?php 
+                                    if (isset($o['created_at'])) {
+                                        $created = strtotime($o['created_at']);
+                                        if (date('Y-m-d') === date('Y-m-d', $created)) {
+                                            echo 'Сегодня, ' . date('H:i', $created);
+                                        } elseif (date('Y-m-d', strtotime('-1 day')) === date('Y-m-d', $created)) {
+                                            echo 'Вчера, ' . date('H:i', $created);
+                                        } else {
+                                            echo date('d.m.Y H:i', $created);
+                                        }
+                                    } else {
+                                        echo '-';
+                                    }
+                                    ?>
+                                </td>
                                 <td>
+                                    <select class="status-select" onchange="updateStatus(<?= $o['id'] ?>, this.value)">
+                                        <option value="new" <?= $o['status'] === 'new' ? 'selected' : '' ?>>🆕 Новый</option>
+                                        <option value="processed" <?= $o['status'] === 'processed' ? 'selected' : '' ?>>🔄 В работе</option>
+                                        <option value="done" <?= $o['status'] === 'done' ? 'selected' : '' ?>>✅ Выполнено</option>
+                                    </select>
+                                </td>
+                                <td>
+                                    <a href="?tab=orders&delete_order=<?= $o['id'] ?>" onclick="return confirm('Удалить заявку #<?= $o['id'] ?>?')" style="color:#ef4444; text-decoration:none; font-size:1.2rem;">🗑️</a>
                                     <?php if ($o['status'] === 'new'): ?>
-                                        <a href="?tab=orders&update_status=<?= $o['id'] ?>&status=processed" class="btn btn-sm" style="background:#3b82f6; color:white; text-decoration:none; display:inline-block;">В работу</a>
-                                    <?php elseif ($o['status'] === 'processed'): ?>
-                                        <a href="?tab=orders&update_status=<?= $o['id'] ?>&status=done" class="btn btn-sm" style="background:#22c55e; color:white; text-decoration:none; display:inline-block;">Выполнено</a>
+                                        <span style="color:#f59e0b; font-size:1.2rem; margin-left:5px;" title="Новая заявка!">🔔</span>
                                     <?php endif; ?>
-                                    <a href="?tab=orders&delete_order=<?= $o['id'] ?>" onclick="return confirm('Удалить заявку?')" style="color:#ef4444; text-decoration:none; margin-left:5px;">🗑️</a>
                                 </td>
                             </tr>
                             <?php endforeach; ?>
-                        </tbody>
-                    </table>
-                <?php else: ?>
-                    <p style="color:#64748b;">Пока нет заявок</p>
-                <?php endif; ?>
+                        <?php else: ?>
+                            <tr><td colspan="8" style="text-align:center; padding:30px; color:#64748b;">📭 Заявок не найдено</td></tr>
+                        <?php endif; ?>
+                    </tbody>
+                </table>
             </div>
+            
+            <script>
+                function updateStatus(id, status) {
+                    const selects = document.querySelectorAll('.status-select');
+                    selects.forEach(function(s) {
+                        const row = s.closest('tr');
+                        if (row && row.id === 'order-' + id) {
+                            s.disabled = true;
+                        }
+                    });
+                    
+                    fetch('admin.php', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                        body: 'ajax_status_update=1&id=' + encodeURIComponent(id) + '&status=' + encodeURIComponent(status)
+                    })
+                    .then(function(response) { return response.json(); })
+                    .then(function(data) {
+                        if (data.success) {
+                            const row = document.getElementById('order-' + id);
+                            if (row) {
+                                row.className = 'order-row-' + status;
+                            }
+                            const selects2 = document.querySelectorAll('.status-select');
+                            selects2.forEach(function(s) { s.disabled = false; });
+                            setTimeout(function() { window.location.reload(); }, 500);
+                        } else {
+                            alert('Ошибка при обновлении статуса');
+                        }
+                    })
+                    .catch(function(error) {
+                        alert('Ошибка: ' + error);
+                    });
+                }
+            </script>
         <?php endif; ?>
 
         <?php if ($tab === 'gallery'): ?>
