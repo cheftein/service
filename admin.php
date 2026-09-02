@@ -41,7 +41,10 @@ if ($is_logged_in) {
         $review = [
             'name' => trim($_POST['review_name']),
             'car' => trim($_POST['review_car']),
-            'text' => trim($_POST['review_text'])
+            'text' => trim($_POST['review_text']),
+            'rating' => (int)($_POST['review_rating'] ?? 5),
+            'status' => 'published',
+            'admin_response' => trim($_POST['admin_response'] ?? '')
         ];
         if ($review['name'] && $review['text']) {
             add_review($review);
@@ -49,10 +52,40 @@ if ($is_logged_in) {
         }
     }
     
+    // Редактирование отзыва
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_review'])) {
+        $id = (int)$_POST['edit_review_id'];
+        $data = [
+            'name' => trim($_POST['edit_review_name']),
+            'car' => trim($_POST['edit_review_car']),
+            'text' => trim($_POST['edit_review_text']),
+            'rating' => (int)($_POST['edit_review_rating'] ?? 5),
+            'status' => $_POST['edit_review_status'] ?? 'pending',
+            'admin_response' => trim($_POST['edit_admin_response'] ?? '')
+        ];
+        if ($data['name'] && $data['text'] && $id) {
+            update_review($id, $data);
+            $success = '✅ Отзыв обновлен!';
+        }
+    }
+    
     // Удаление отзыва
     if (isset($_GET['delete_review'])) {
         delete_review((int)$_GET['delete_review']);
         header('Location: admin.php?tab=reviews');
+        exit;
+    }
+    
+    // Обновление статуса отзыва через AJAX
+    if (isset($_POST['ajax_review_status'])) {
+        $id = (int)$_POST['id'];
+        $status = $_POST['status'] ?? '';
+        if ($id && $status) {
+            update_review_status($id, $status);
+            echo json_encode(['success' => true]);
+        } else {
+            echo json_encode(['success' => false]);
+        }
         exit;
     }
     
@@ -125,7 +158,6 @@ if ($is_logged_in) {
                 $services[$index] = $services[$index + 1];
                 $services[$index + 1] = $temp;
             }
-            // Обновляем sort_order
             foreach ($services as $i => &$s) {
                 $s['sort_order'] = $i + 1;
             }
@@ -160,6 +192,44 @@ $reviews = get_reviews();
 $orders = get_orders();
 $gallery = get_gallery();
 $new_orders_count = count(array_filter($orders, function($o) { return $o['status'] === 'new'; }));
+
+// Для редактирования отзыва
+$edit_review_id = isset($_GET['edit_review']) ? (int)$_GET['edit_review'] : 0;
+$edit_review_data = null;
+if ($edit_review_id) {
+    foreach ($reviews as $r) {
+        if ($r['id'] === $edit_review_id) {
+            $edit_review_data = $r;
+            break;
+        }
+    }
+}
+
+// Фильтрация отзывов
+$review_filter = $_GET['review_filter'] ?? 'all';
+$filtered_reviews = $reviews;
+if ($review_filter !== 'all') {
+    $filtered_reviews = array_filter($filtered_reviews, function($r) use ($review_filter) {
+        return ($r['status'] ?? 'published') === $review_filter;
+    });
+}
+// Сортировка: сначала новые
+usort($filtered_reviews, function($a, $b) {
+    return strtotime($b['created_at'] ?? '0') - strtotime($a['created_at'] ?? '0');
+});
+
+// Статистика отзывов
+$total_reviews = count($reviews);
+$published_count = count(array_filter($reviews, function($r) { return ($r['status'] ?? 'published') === 'published'; }));
+$pending_count = count(array_filter($reviews, function($r) { return ($r['status'] ?? 'published') === 'pending'; }));
+$rejected_count = count(array_filter($reviews, function($r) { return ($r['status'] ?? 'published') === 'rejected'; }));
+
+// Средний рейтинг
+$avg_rating = 0;
+if ($total_reviews > 0) {
+    $sum_rating = array_sum(array_column($reviews, 'rating'));
+    $avg_rating = round($sum_rating / $total_reviews, 1);
+}
 
 // Для редактирования услуги
 $edit_service_id = isset($_GET['edit_service']) ? (int)$_GET['edit_service'] : 0;
@@ -236,6 +306,27 @@ if (isset($_GET['export_services']) && $_GET['export_services'] === 'csv') {
     fclose($output);
     exit;
 }
+
+// Экспорт отзывов в CSV
+if (isset($_GET['export_reviews']) && $_GET['export_reviews'] === 'csv') {
+    header('Content-Type: text/csv; charset=utf-8');
+    header('Content-Disposition: attachment; filename=otzyvy_' . date('Y-m-d') . '.csv');
+    $output = fopen('php://output', 'w');
+    fputcsv($output, ['ID', 'Имя', 'Автомобиль', 'Рейтинг', 'Отзыв', 'Статус', 'Дата']);
+    foreach ($filtered_reviews as $r) {
+        fputcsv($output, [
+            $r['id'],
+            $r['name'],
+            $r['car'] ?? '',
+            $r['rating'] ?? 5,
+            $r['text'],
+            $r['status'] ?? 'published',
+            $r['created_at'] ?? ''
+        ]);
+    }
+    fclose($output);
+    exit;
+}
 ?>
 <!DOCTYPE html>
 <html lang="ru">
@@ -290,6 +381,9 @@ if (isset($_GET['export_services']) && $_GET['export_services'] === 'csv') {
         .status-new { background:#fef3c7; color:#92400e; }
         .status-processed { background:#dbeafe; color:#1e40af; }
         .status-done { background:#bbf7d0; color:#15803d; }
+        .status-published { background:#bbf7d0; color:#15803d; }
+        .status-pending { background:#fef3c7; color:#92400e; }
+        .status-rejected { background:#fee2e2; color:#dc2626; }
         .logout-link { color:#ef4444; margin-top:20px; display:block; text-decoration:none; }
         .logout-link:hover { color:#dc2626; }
         .flex-between { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; }
@@ -311,6 +405,9 @@ if (isset($_GET['export_services']) && $_GET['export_services'] === 'csv') {
         .filters a.active-processed { background:#dbeafe; color:#1e40af; }
         .filters a.active-done { background:#bbf7d0; color:#15803d; }
         .filters a.active-category { background:#0b1a2e; color:white; }
+        .filters a.active-published { background:#bbf7d0; color:#15803d; }
+        .filters a.active-pending { background:#fef3c7; color:#92400e; }
+        .filters a.active-rejected { background:#fee2e2; color:#dc2626; }
         
         .order-row-new { background:#fef3c7; }
         .order-row-processed { background:#dbeafe; }
@@ -339,6 +436,21 @@ if (isset($_GET['export_services']) && $_GET['export_services'] === 'csv') {
         }
         .new-order-blink { animation:pulse-new 1.5s infinite; font-weight:700; }
         
+        /* Стили для карточек отзывов */
+        .review-card-admin { background:white; border-radius:15px; padding:20px; margin-bottom:15px; box-shadow:0 2px 10px rgba(0,0,0,0.05); border-left:4px solid #22c55e; }
+        .review-card-admin.pending { border-left-color:#f59e0b; }
+        .review-card-admin.rejected { border-left-color:#ef4444; opacity:0.7; }
+        .review-card-admin .review-header { display:flex; align-items:center; gap:15px; flex-wrap:wrap; }
+        .review-card-admin .review-avatar { width:50px; height:50px; border-radius:50%; background:#facc15; display:flex; align-items:center; justify-content:center; font-size:1.8rem; flex-shrink:0; }
+        .review-card-admin .review-name { font-weight:700; font-size:1.1rem; }
+        .review-card-admin .review-car { color:#64748b; font-size:0.9rem; }
+        .review-card-admin .review-rating { color:#f59e0b; font-size:1.2rem; margin-left:auto; }
+        .review-card-admin .review-text { margin:15px 0; color:#1e293b; padding:10px 0; border-top:1px solid #e2e8f0; }
+        .review-card-admin .review-date { color:#94a3b8; font-size:0.8rem; }
+        .review-card-admin .admin-response { background:#f1f5f9; padding:12px 15px; border-radius:10px; margin-top:10px; border-left:3px solid #3b82f6; }
+        .review-card-admin .review-actions { display:flex; gap:10px; margin-top:10px; flex-wrap:wrap; }
+        .review-card-admin .review-actions a { text-decoration:none; }
+        
         /* Стили для карточек услуг на мобильных */
         .service-card-mobile { background:white; padding:15px; border-radius:12px; margin-bottom:10px; box-shadow:0 2px 10px rgba(0,0,0,0.05); border-left:4px solid #facc15; }
         .service-card-mobile .row { display:flex; justify-content:space-between; padding:5px 0; }
@@ -360,6 +472,8 @@ if (isset($_GET['export_services']) && $_GET['export_services'] === 'csv') {
             .filters { gap:5px; }
             .filters a { padding:5px 12px; font-size:0.8rem; }
             .export-buttons { gap:5px; }
+            .review-card-admin .review-header { flex-wrap:wrap; }
+            .review-card-admin .review-rating { margin-left:0; }
         }
         @media print {
             .sidebar, .filters, .export-buttons, .no-print { display:none !important; }
@@ -413,7 +527,7 @@ if (isset($_GET['export_services']) && $_GET['export_services'] === 'csv') {
             <h1 style="margin-bottom:20px;">👋 Добро пожаловать!</h1>
             <div class="stats">
                 <div class="stat"><div class="num"><?= count($services) ?></div><div class="label">Услуг</div></div>
-                <div class="stat"><div class="num"><?= count($reviews) ?></div><div class="label">Отзывов</div></div>
+                <div class="stat"><div class="num"><?= $total_reviews ?></div><div class="label">Отзывов</div></div>
                 <div class="stat"><div class="num"><?= $new_orders_count ?></div><div class="label">Новых заявок</div></div>
                 <div class="stat"><div class="num"><?= count($gallery) ?></div><div class="label">Фото</div></div>
             </div>
@@ -431,7 +545,6 @@ if (isset($_GET['export_services']) && $_GET['export_services'] === 'csv') {
                         <div class="form-group">
                             <label><?= htmlspecialchars($key) ?></label>
                             <?php 
-                            // Определяем, какие поля должны быть многострочными
                             $long_fields = ['about_text', 'hero_subtitle', 'address'];
                             if (in_array($key, $long_fields) || strlen($value) > 60): 
                             ?>
@@ -448,14 +561,11 @@ if (isset($_GET['export_services']) && $_GET['export_services'] === 'csv') {
 
         <?php if ($tab === 'services'): ?>
             <?php
-            // Получаем список услуг
             $all_services = get_services();
-            // Сортировка по sort_order
             usort($all_services, function($a, $b) {
                 return ($a['sort_order'] ?? 0) - ($b['sort_order'] ?? 0);
             });
             
-            // Поиск
             $search_service = $_GET['search_service'] ?? '';
             $filtered_services = $all_services;
             if ($search_service) {
@@ -466,7 +576,6 @@ if (isset($_GET['export_services']) && $_GET['export_services'] === 'csv') {
                 });
             }
             
-            // Фильтр по категории
             $category_filter = $_GET['category'] ?? 'all';
             if ($category_filter !== 'all') {
                 $filtered_services = array_filter($filtered_services, function($s) use ($category_filter) {
@@ -474,7 +583,6 @@ if (isset($_GET['export_services']) && $_GET['export_services'] === 'csv') {
                 });
             }
             
-            // Категории
             $categories = [
                 'all' => '📋 Все',
                 'repair' => '🔧 Ремонт',
@@ -483,7 +591,6 @@ if (isset($_GET['export_services']) && $_GET['export_services'] === 'csv') {
                 'tires' => '🛞 Шиномонтаж'
             ];
             
-            // Статистика по категориям
             $stats_categories = [];
             foreach ($categories as $key => $label) {
                 if ($key === 'all') continue;
@@ -492,7 +599,6 @@ if (isset($_GET['export_services']) && $_GET['export_services'] === 'csv') {
                 }));
             }
             
-            // Самая дорогая услуга
             $max_price = 0;
             $max_price_service = '—';
             foreach ($all_services as $s) {
@@ -512,7 +618,6 @@ if (isset($_GET['export_services']) && $_GET['export_services'] === 'csv') {
                 </div>
             </div>
             
-            <!-- СТАТИСТИКА -->
             <div class="stats" style="margin-bottom:20px;">
                 <div class="stat">
                     <div class="num"><?= count($all_services) ?></div>
@@ -530,7 +635,6 @@ if (isset($_GET['export_services']) && $_GET['export_services'] === 'csv') {
                 </div>
             </div>
             
-            <!-- ФИЛЬТРЫ ПО КАТЕГОРИЯМ -->
             <div class="filters">
                 <?php foreach ($categories as $key => $label): ?>
                     <a href="?tab=services&category=<?= $key ?><?= $search_service ? '&search_service='.urlencode($search_service) : '' ?>" class="<?= $category_filter === $key ? 'active-category' : '' ?>">
@@ -539,7 +643,6 @@ if (isset($_GET['export_services']) && $_GET['export_services'] === 'csv') {
                 <?php endforeach; ?>
             </div>
             
-            <!-- ПОИСК -->
             <div class="export-buttons">
                 <form method="GET" style="display:flex; gap:10px; flex-wrap:wrap; flex:1;">
                     <input type="hidden" name="tab" value="services">
@@ -554,7 +657,6 @@ if (isset($_GET['export_services']) && $_GET['export_services'] === 'csv') {
                 </form>
             </div>
             
-            <!-- ДОБАВЛЕНИЕ УСЛУГИ -->
             <div class="card">
                 <h3><?= $edit_service_data ? '✏️ Редактировать услугу' : '➕ Добавить услугу' ?></h3>
                 <form method="POST">
@@ -597,7 +699,6 @@ if (isset($_GET['export_services']) && $_GET['export_services'] === 'csv') {
                 </form>
             </div>
             
-            <!-- СПИСОК УСЛУГ -->
             <div class="card">
                 <h3>📋 Список услуг (<?= count($filtered_services) ?>)</h3>
                 
@@ -669,7 +770,6 @@ if (isset($_GET['export_services']) && $_GET['export_services'] === 'csv') {
                 <?php endif; ?>
             </div>
             
-            <!-- ПРЕВЬЮ УСЛУГ (КАК НА САЙТЕ) -->
             <div class="card">
                 <h3>👁️ Превью услуг (как на сайте)</h3>
                 <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:15px; margin-top:15px;">
@@ -689,53 +789,209 @@ if (isset($_GET['export_services']) && $_GET['export_services'] === 'csv') {
         <?php endif; ?>
 
         <?php if ($tab === 'reviews'): ?>
-            <h1 style="margin-bottom:20px;">💬 Управление отзывами</h1>
-            <div class="card">
-                <h3>➕ Добавить отзыв</h3>
-                <form method="POST">
-                    <div class="form-group">
-                        <label>Имя клиента</label>
-                        <input type="text" name="review_name" placeholder="Например: Алексей" required>
-                    </div>
-                    <div class="form-group">
-                        <label>Автомобиль</label>
-                        <input type="text" name="review_car" placeholder="Например: Kia Rio, 2020">
-                    </div>
-                    <div class="form-group">
-                        <label>Текст отзыва</label>
-                        <textarea name="review_text" placeholder="Текст отзыва..." rows="3" required></textarea>
-                    </div>
-                    <button type="submit" name="add_review" class="btn">➕ Добавить отзыв</button>
+            <?php
+            // Статистика отзывов
+            $total_reviews = count($reviews);
+            $published_count = count(array_filter($reviews, function($r) { return ($r['status'] ?? 'published') === 'published'; }));
+            $pending_count = count(array_filter($reviews, function($r) { return ($r['status'] ?? 'published') === 'pending'; }));
+            $rejected_count = count(array_filter($reviews, function($r) { return ($r['status'] ?? 'published') === 'rejected'; }));
+            
+            // Средний рейтинг
+            $avg_rating = 0;
+            if ($total_reviews > 0) {
+                $sum_rating = array_sum(array_column($reviews, 'rating'));
+                $avg_rating = round($sum_rating / $total_reviews, 1);
+            }
+            
+            // Фильтрация
+            $review_filter = $_GET['review_filter'] ?? 'all';
+            $filtered_reviews = $reviews;
+            if ($review_filter !== 'all') {
+                $filtered_reviews = array_filter($filtered_reviews, function($r) use ($review_filter) {
+                    return ($r['status'] ?? 'published') === $review_filter;
+                });
+            }
+            // Поиск
+            $review_search = $_GET['review_search'] ?? '';
+            if ($review_search) {
+                $search_lower = mb_strtolower($review_search);
+                $filtered_reviews = array_filter($filtered_reviews, function($r) use ($search_lower) {
+                    return mb_strpos(mb_strtolower($r['name']), $search_lower) !== false ||
+                           mb_strpos(mb_strtolower($r['text']), $search_lower) !== false ||
+                           mb_strpos(mb_strtolower($r['car'] ?? ''), $search_lower) !== false;
+                });
+            }
+            usort($filtered_reviews, function($a, $b) {
+                return strtotime($b['created_at'] ?? '0') - strtotime($a['created_at'] ?? '0');
+            });
+            ?>
+            
+            <div class="flex-between" style="margin-bottom:20px;">
+                <h1>💬 Управление отзывами</h1>
+                <div style="display:flex; gap:10px;">
+                    <a href="?tab=reviews&export_reviews=csv<?= $review_filter !== 'all' ? '&review_filter='.$review_filter : '' ?><?= $review_search ? '&review_search='.urlencode($review_search) : '' ?>" class="btn btn-sm btn-success" onclick="return confirm('Экспортировать отзывы в CSV?')">📥 CSV</a>
+                    <button class="btn btn-sm btn-primary" onclick="window.print()">🖨️ Печать</button>
+                </div>
+            </div>
+            
+            <!-- СТАТИСТИКА -->
+            <div class="stats" style="margin-bottom:20px;">
+                <div class="stat">
+                    <div class="num"><?= $total_reviews ?></div>
+                    <div class="label">📊 Всего отзывов</div>
+                </div>
+                <div class="stat">
+                    <div class="num" style="color:#15803d;"><?= $published_count ?></div>
+                    <div class="label">✅ Опубликовано</div>
+                </div>
+                <div class="stat">
+                    <div class="num" style="color:#92400e;"><?= $pending_count ?></div>
+                    <div class="label">⏳ На модерации</div>
+                </div>
+                <div class="stat">
+                    <div class="num" style="color:#dc2626;"><?= $rejected_count ?></div>
+                    <div class="label">❌ Отклонено</div>
+                </div>
+                <div class="stat">
+                    <div class="num" style="color:#f59e0b;">⭐ <?= $avg_rating ?></div>
+                    <div class="label">Средний рейтинг</div>
+                </div>
+            </div>
+            
+            <!-- ФИЛЬТРЫ -->
+            <div class="filters">
+                <a href="?tab=reviews" class="<?= $review_filter === 'all' ? 'active' : '' ?>">📋 Все (<?= $total_reviews ?>)</a>
+                <a href="?tab=reviews&review_filter=published" class="<?= $review_filter === 'published' ? 'active-published' : '' ?>">✅ Опубликованы (<?= $published_count ?>)</a>
+                <a href="?tab=reviews&review_filter=pending" class="<?= $review_filter === 'pending' ? 'active-pending' : '' ?>">⏳ На модерации (<?= $pending_count ?>)</a>
+                <a href="?tab=reviews&review_filter=rejected" class="<?= $review_filter === 'rejected' ? 'active-rejected' : '' ?>">❌ Отклонены (<?= $rejected_count ?>)</a>
+            </div>
+            
+            <!-- ПОИСК -->
+            <div class="export-buttons">
+                <form method="GET" style="display:flex; gap:10px; flex-wrap:wrap; flex:1;">
+                    <input type="hidden" name="tab" value="reviews">
+                    <?php if ($review_filter !== 'all'): ?>
+                        <input type="hidden" name="review_filter" value="<?= htmlspecialchars($review_filter) ?>">
+                    <?php endif; ?>
+                    <input type="text" name="review_search" placeholder="🔍 Поиск по имени, тексту или авто..." value="<?= htmlspecialchars($review_search) ?>" style="padding:8px 15px; border:2px solid #e2e8f0; border-radius:20px; flex:1; min-width:200px;">
+                    <button type="submit" class="btn-sm" style="background:#0b1a2e; color:white;">🔍 Найти</button>
+                    <?php if ($review_search): ?>
+                        <a href="?tab=reviews<?= $review_filter !== 'all' ? '&review_filter='.$review_filter : '' ?>" class="btn-sm" style="background:#ef4444; color:white; text-decoration:none;">✕ Сбросить</a>
+                    <?php endif; ?>
                 </form>
             </div>
+            
+            <!-- ДОБАВЛЕНИЕ ОТЗЫВА -->
             <div class="card">
-                <h3>📋 Все отзывы</h3>
-                <?php if (count($reviews) > 0): ?>
-                    <?php foreach ($reviews as $r): ?>
-                        <div style="border-bottom:1px solid #e2e8f0; padding:15px 0; display:flex; justify-content:space-between; align-items:center;">
-                            <div>
-                                <strong><?= htmlspecialchars($r['name']) ?></strong>
-                                <?php if ($r['car']): ?>
-                                    <span style="color:#64748b;">— <?= htmlspecialchars($r['car']) ?></span>
-                                <?php endif; ?>
-                                <p style="margin-top:5px; color:#475569;"><?= htmlspecialchars($r['text']) ?></p>
-                            </div>
-                            <a href="?tab=reviews&delete_review=<?= $r['id'] ?>" onclick="return confirm('Удалить отзыв?')" style="color:#ef4444; text-decoration:none;">🗑️</a>
+                <h3><?= $edit_review_data ? '✏️ Редактировать отзыв' : '➕ Добавить отзыв' ?></h3>
+                <form method="POST">
+                    <?php if ($edit_review_data): ?>
+                        <input type="hidden" name="edit_review_id" value="<?= $edit_review_data['id'] ?>">
+                    <?php endif; ?>
+                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px;">
+                        <div class="form-group">
+                            <label>Имя клиента</label>
+                            <input type="text" name="<?= $edit_review_data ? 'edit_review_name' : 'review_name' ?>" placeholder="Например: Алексей" value="<?= $edit_review_data ? htmlspecialchars($edit_review_data['name']) : '' ?>" required>
                         </div>
+                        <div class="form-group">
+                            <label>Автомобиль</label>
+                            <input type="text" name="<?= $edit_review_data ? 'edit_review_car' : 'review_car' ?>" placeholder="Например: Kia Rio, 2020" value="<?= $edit_review_data ? htmlspecialchars($edit_review_data['car'] ?? '') : '' ?>">
+                        </div>
+                        <div class="form-group">
+                            <label>Рейтинг (звёзды)</label>
+                            <select name="<?= $edit_review_data ? 'edit_review_rating' : 'review_rating' ?>">
+                                <option value="5" <?= $edit_review_data && ($edit_review_data['rating'] ?? 5) == 5 ? 'selected' : '' ?>>⭐⭐⭐⭐⭐ (5)</option>
+                                <option value="4" <?= $edit_review_data && ($edit_review_data['rating'] ?? 5) == 4 ? 'selected' : '' ?>>⭐⭐⭐⭐ (4)</option>
+                                <option value="3" <?= $edit_review_data && ($edit_review_data['rating'] ?? 5) == 3 ? 'selected' : '' ?>>⭐⭐⭐ (3)</option>
+                                <option value="2" <?= $edit_review_data && ($edit_review_data['rating'] ?? 5) == 2 ? 'selected' : '' ?>>⭐⭐ (2)</option>
+                                <option value="1" <?= $edit_review_data && ($edit_review_data['rating'] ?? 5) == 1 ? 'selected' : '' ?>>⭐ (1)</option>
+                            </select>
+                        </div>
+                        <?php if ($edit_review_data): ?>
+                            <div class="form-group">
+                                <label>Статус</label>
+                                <select name="edit_review_status">
+                                    <option value="published" <?= ($edit_review_data['status'] ?? 'published') === 'published' ? 'selected' : '' ?>>✅ Опубликован</option>
+                                    <option value="pending" <?= ($edit_review_data['status'] ?? 'published') === 'pending' ? 'selected' : '' ?>>⏳ На модерации</option>
+                                    <option value="rejected" <?= ($edit_review_data['status'] ?? 'published') === 'rejected' ? 'selected' : '' ?>>❌ Отклонён</option>
+                                </select>
+                            </div>
+                        <?php endif; ?>
+                        <div class="form-group" style="grid-column: span 2;">
+                            <label>Текст отзыва</label>
+                            <textarea name="<?= $edit_review_data ? 'edit_review_text' : 'review_text' ?>" placeholder="Текст отзыва..." rows="3" required><?= $edit_review_data ? htmlspecialchars($edit_review_data['text']) : '' ?></textarea>
+                        </div>
+                        <div class="form-group" style="grid-column: span 2;">
+                            <label>Ответ администратора</label>
+                            <textarea name="<?= $edit_review_data ? 'edit_admin_response' : 'admin_response' ?>" placeholder="Ответ на отзыв..." rows="2"><?= $edit_review_data ? htmlspecialchars($edit_review_data['admin_response'] ?? '') : '' ?></textarea>
+                        </div>
+                    </div>
+                    <button type="submit" name="<?= $edit_review_data ? 'edit_review' : 'add_review' ?>" class="btn">
+                        <?= $edit_review_data ? '💾 Сохранить изменения' : '➕ Добавить отзыв' ?>
+                    </button>
+                    <?php if ($edit_review_data): ?>
+                        <a href="?tab=reviews" class="btn" style="background:#64748b; color:white; text-decoration:none; margin-left:10px;">✕ Отмена</a>
+                    <?php endif; ?>
+                </form>
+            </div>
+            
+            <!-- ВСЕ ОТЗЫВЫ (КАРТОЧКИ) -->
+            <div class="card">
+                <h3>📋 Все отзывы (<?= count($filtered_reviews) ?>)</h3>
+                
+                <?php if (count($filtered_reviews) > 0): ?>
+                    <?php foreach ($filtered_reviews as $r): ?>
+                    <div class="review-card-admin <?= $r['status'] ?? 'published' ?>" id="review-card-<?= $r['id'] ?>">
+                        <div class="review-header">
+                            <div class="review-avatar">👤</div>
+                            <div>
+                                <div class="review-name"><?= htmlspecialchars($r['name']) ?></div>
+                                <div class="review-car">🚗 <?= htmlspecialchars($r['car'] ?? 'Не указан') ?></div>
+                            </div>
+                            <div class="review-rating">
+                                <?php 
+                                $rating = $r['rating'] ?? 5;
+                                echo str_repeat('⭐', $rating) . str_repeat('☆', 5 - $rating);
+                                ?>
+                            </div>
+                            <div>
+                                <span class="status-badge status-<?= $r['status'] ?? 'published' ?>">
+                                    <?php 
+                                    $status_labels = ['published' => '✅ Опубликован', 'pending' => '⏳ На модерации', 'rejected' => '❌ Отклонён'];
+                                    echo $status_labels[$r['status'] ?? 'published'] ?? 'Опубликован';
+                                    ?>
+                                </span>
+                            </div>
+                        </div>
+                        <div class="review-text"><?= nl2br(htmlspecialchars($r['text'])) ?></div>
+                        
+                        <?php if (!empty($r['admin_response'])): ?>
+                            <div class="admin-response">
+                                <strong>👤 Администратор:</strong>
+                                <?= nl2br(htmlspecialchars($r['admin_response'])) ?>
+                            </div>
+                        <?php endif; ?>
+                        
+                        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-top:10px;">
+                            <div class="review-date">📅 <?= isset($r['created_at']) ? date('d.m.Y H:i', strtotime($r['created_at'])) : '—' ?></div>
+                            <div class="review-actions">
+                                <a href="?tab=reviews&edit_review=<?= $r['id'] ?>" class="btn btn-sm btn-primary" style="text-decoration:none; color:white; padding:4px 12px; border-radius:6px; font-size:0.8rem;">✏️ Редактировать</a>
+                                <a href="?tab=reviews&delete_review=<?= $r['id'] ?>" onclick="return confirm('Удалить отзыв?')" class="btn btn-sm btn-danger" style="text-decoration:none; color:white; padding:4px 12px; border-radius:6px; font-size:0.8rem;">🗑️ Удалить</a>
+                            </div>
+                        </div>
+                    </div>
                     <?php endforeach; ?>
                 <?php else: ?>
-                    <p style="color:#64748b;">Пока нет отзывов</p>
+                    <p style="color:#64748b; text-align:center; padding:30px;">📭 Отзывов не найдено</p>
                 <?php endif; ?>
             </div>
         <?php endif; ?>
 
         <?php if ($tab === 'orders'): ?>
             <?php
-            // Получаем параметры фильтра
             $filter = $_GET['filter'] ?? 'all';
             $search = $_GET['search'] ?? '';
             
-            // Фильтрация заявок
             $filtered_orders = $orders;
             if ($filter !== 'all') {
                 $filtered_orders = array_filter($filtered_orders, function($o) use ($filter) {
@@ -749,21 +1005,18 @@ if (isset($_GET['export_services']) && $_GET['export_services'] === 'csv') {
                            mb_strpos($o['phone'], $search_lower) !== false;
                 });
             }
-            // Сортировка: сначала новые
             usort($filtered_orders, function($a, $b) {
                 if ($a['status'] === 'new' && $b['status'] !== 'new') return -1;
                 if ($a['status'] !== 'new' && $b['status'] === 'new') return 1;
                 return strtotime($b['created_at'] ?? '0') - strtotime($a['created_at'] ?? '0');
             });
             
-            // Статистика
             $total = count($orders);
             $new_count = count(array_filter($orders, function($o) { return $o['status'] === 'new'; }));
             $processed_count = count(array_filter($orders, function($o) { return $o['status'] === 'processed'; }));
             $done_count = count(array_filter($orders, function($o) { return $o['status'] === 'done'; }));
             $filtered_count = count($filtered_orders);
             
-            // Обработка AJAX запроса для изменения статуса
             if (isset($_POST['ajax_status_update'])) {
                 $id = (int)$_POST['id'];
                 $status = $_POST['status'] ?? '';
@@ -776,7 +1029,6 @@ if (isset($_GET['export_services']) && $_GET['export_services'] === 'csv') {
                 exit;
             }
             
-            // Обработка экспорта CSV
             if (isset($_GET['export']) && $_GET['export'] === 'csv') {
                 header('Content-Type: text/csv; charset=utf-8');
                 header('Content-Disposition: attachment; filename=zayavki_' . date('Y-m-d') . '.csv');
@@ -801,7 +1053,6 @@ if (isset($_GET['export_services']) && $_GET['export_services'] === 'csv') {
             <h1 style="margin-bottom:10px;">📩 Заявки</h1>
             <p style="color:#64748b; margin-bottom:20px;">Управление входящими заявками от клиентов</p>
             
-            <!-- СТАТИСТИКА -->
             <div class="stats-orders">
                 <div class="stat-order">
                     <div class="num"><?= $total ?></div>
@@ -821,7 +1072,6 @@ if (isset($_GET['export_services']) && $_GET['export_services'] === 'csv') {
                 </div>
             </div>
             
-            <!-- ФИЛЬТРЫ -->
             <div class="filters">
                 <a href="?tab=orders" class="<?= $filter === 'all' ? 'active' : '' ?>">📋 Все (<?= $total ?>)</a>
                 <a href="?tab=orders&filter=new" class="<?= $filter === 'new' ? 'active-new' : '' ?>">🆕 Новые (<?= $new_count ?>)</a>
@@ -829,7 +1079,6 @@ if (isset($_GET['export_services']) && $_GET['export_services'] === 'csv') {
                 <a href="?tab=orders&filter=done" class="<?= $filter === 'done' ? 'active-done' : '' ?>">✅ Выполнено (<?= $done_count ?>)</a>
             </div>
             
-            <!-- ПОИСК И ЭКСПОРТ -->
             <div class="export-buttons">
                 <form method="GET" style="display:flex; gap:10px; flex-wrap:wrap; flex:1;">
                     <input type="hidden" name="tab" value="orders">
@@ -846,7 +1095,6 @@ if (isset($_GET['export_services']) && $_GET['export_services'] === 'csv') {
                 <button class="btn-sm print" onclick="window.print()">🖨️ Печать</button>
             </div>
             
-            <!-- ТАБЛИЦА (ДЛЯ ПК) -->
             <div class="card" style="overflow-x:auto;" id="ordersTable">
                 <table class="table">
                     <thead>
